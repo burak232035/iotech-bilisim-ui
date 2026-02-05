@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Akıllı Kampüs - Giriş</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="giris.css">
+</head>
+
+<body class="auth-body">
+    <header class="header">
+        <div class="logo-box">
+            <span class="logo-title">Drone Sistemi</span>
+        </div>
+        <nav class="nav">
+            <ul class="nav-list">
+                <li><a href="../anasayfa/index.html">Ana Sayfa</a></li>
+                <li><a href="../hakkimizda_ekrani/hakkimizda.html">Hakkımızda</a></li>
+                <li><a href="../projeler/projeler.html">Projeler</a></li>
+                <li><a href="../iletisim/iletisim.html">İletişim</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <main class="auth-main">
+        <section class="auth-card">
+            <h1 class="auth-title">Yönetici Girişi</h1>
+            <p class="auth-subtitle">Akıllı Kampüs yönetim paneline erişmek için giriş yapın.</p>
+
+            <form id="loginForm" class="auth-form">
+                <div class="form-group">
+                    <label for="username">Kullanıcı Adı</label>
+                    <input type="text" id="username" name="username" placeholder="Örn: admin" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="password">Şifre</label>
+                    <input type="password" id="password" name="password" placeholder="Şifrenizi girin" required>
+                </div>
+
+                <div class="form-footer">
+                    <label class="remember-me">
+                        <input type="checkbox" id="rememberMe">
+                        Beni hatırla
+                    </label>
+
+                    <div class="form-links">
+                        <a href="sifremiUnuttum.html" class="link-muted">Şifremi unuttum</a>
+                        <a href="kayit.html" class="link-accent">Yeni kullanıcı oluştur</a>
+                    </div>
+                </div>
+
+
+                <button type="submit" class="btn primary-btn full-width">Giriş Yap</button>
+
+                <p id="loginError" class="form-error" hidden>
+                    Hatalı kullanıcı adı veya şifre.
+                </p>
+            </form>
+        </section>
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="site-footer">
+        IOTECH Yazılım - 2023
+    </footer>
+
+    <script src="giris.js"></script>
+</body>
+
+</html>

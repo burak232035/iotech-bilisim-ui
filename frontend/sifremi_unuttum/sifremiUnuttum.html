@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Akıllı Kampüs - Şifremi Unuttum</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Genel stiller -->
+    <link rel="stylesheet" href="sifremiUnuttum.css">
+</head>
+
+<body class="auth-body">
+    <!-- HEADER (diğer sayfalarla aynı) -->
+    <header class="header">
+        <div class="logo-box">
+            <span class="logo-title">Drone Sistemi</span>
+        </div>
+        <nav class="nav">
+            <ul class="nav-list">
+                <li><a href="../anasayfa/index.html">Ana Sayfa</a></li>
+                <li><a href="../hakkimizda_ekrani/hakkimizda.html">Hakkımızda</a></li>
+                <li><a href="../projeler/projeler.html">Projeler</a></li>
+                <li><a href="../iletisim/iletisim.html">İletişim</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <!-- ANA İÇERİK -->
+    <main class="auth-main">
+        <section class="auth-card reset-card">
+            <h1 class="auth-title">Şifremi Unuttum</h1>
+            <p class="auth-subtitle reset-description">
+                Hesabınıza kayıtlı e-posta adresinizi girin. Şifre sıfırlama bağlantısını
+                size e-posta olarak göndereceğiz.
+            </p>
+
+            <form id="resetForm" class="auth-form">
+                <div class="form-group">
+                    <label for="resetEmail">E-posta Adresi</label>
+                    <input type="email" id="resetEmail" name="resetEmail" placeholder="ornek@kampus.edu.tr" required>
+                </div>
+
+                <button type="submit" class="btn primary-btn full-width">
+                    Sıfırlama Bağlantısını Gönder
+                </button>
+
+                <p id="resetError" class="form-error" hidden></p>
+
+                <p id="resetSuccess" class="form-success" hidden>
+                    Eğer bu e-posta ile eşleşen bir hesabınız varsa,
+                    şifre sıfırlama bağlantısı adresinize gönderildi.
+                </p>
+
+                <p class="reset-back-link">
+                    Şifrenizi hatırladınız mı?
+                    <a href="giris.html" class="link-accent">Giriş sayfasına dön</a>
+                </p>
+            </form>
+        </section>
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="site-footer">
+        IOTECH Yazılım - 2023
+    </footer>
+
+    <!-- JS -->
+    <!-- Önce EmailJS CDN, sonra sayfaya özel JS -->
+    <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+    <script src="sifremiUnuttum.js"></script>
+</body>
+
+</html>

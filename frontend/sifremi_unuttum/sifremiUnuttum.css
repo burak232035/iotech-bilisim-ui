@@ -1,0 +1,333 @@
+/* ====== Global Reset ====== */
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    padding: 0;
+}
+
+/* ====== Ortak Auth Stilleri ====== */
+
+.auth-body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: radial-gradient(circle at top, #131b3d 0, #050814 45%, #02030a 100%);
+    color: #f5f5f5;
+}
+
+.auth-main {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 1rem 3rem;
+}
+
+.auth-card {
+    width: 100%;
+    max-width: 420px;
+    background: rgba(10, 14, 30, 0.92);
+    border-radius: 18px;
+    padding: 2.2rem 2rem;
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
+    border: 1px solid rgba(120, 172, 255, 0.18);
+    backdrop-filter: blur(18px);
+}
+
+.auth-title {
+    font-size: 1.6rem;
+    margin-bottom: 0.4rem;
+}
+
+.auth-subtitle {
+    font-size: 0.9rem;
+    color: #aeb4c7;
+    margin-bottom: 1.5rem;
+}
+
+.auth-form .form-group {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 1.1rem;
+}
+
+.auth-form label {
+    font-size: 0.86rem;
+    margin-bottom: 0.35rem;
+    color: #c5c9dd;
+}
+
+.auth-form input[type="text"],
+.auth-form input[type="password"],
+.auth-form input[type="email"] {
+    padding: 0.7rem 0.85rem;
+    border-radius: 10px;
+    border: 1px solid rgba(120, 172, 255, 0.25);
+    background: rgba(5, 8, 22, 0.95);
+    color: #f5f5f5;
+    font-size: 0.95rem;
+    outline: none;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+
+.auth-form input[type="text"]::placeholder,
+.auth-form input[type="password"]::placeholder,
+.auth-form input[type="email"]::placeholder {
+    color: #656b80;
+}
+
+.auth-form input[type="text"]:focus,
+.auth-form input[type="password"]:focus,
+.auth-form input[type="email"]:focus {
+    border-color: #5b8dff;
+    box-shadow: 0 0 0 1px rgba(91, 141, 255, 0.45);
+    background: rgba(5, 10, 30, 0.98);
+}
+
+.btn.primary-btn.full-width {
+    width: 100%;
+}
+
+/* Genel buton stili */
+.btn {
+    border: none;
+    cursor: pointer;
+    padding: 0.75rem 1.2rem;
+    border-radius: 999px;
+    font-size: 0.95rem;
+    font-weight: 500;
+}
+
+.primary-btn {
+    background: linear-gradient(135deg, #4f8cff, #5bffdb);
+    color: #050814;
+    box-shadow: 0 10px 25px rgba(64, 120, 255, 0.45);
+    transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+
+.primary-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 14px 30px rgba(64, 120, 255, 0.5);
+    filter: brightness(1.05);
+}
+
+.primary-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 8px 18px rgba(64, 120, 255, 0.4);
+}
+
+/* Hata / Başarı mesajları */
+
+.form-error {
+    margin-top: 0.75rem;
+    font-size: 0.82rem;
+    color: #ff6b81;
+}
+
+.form-success {
+    margin-top: 0.75rem;
+    font-size: 0.82rem;
+    color: #4ade80;
+}
+
+/* Küçük ekran uyumu */
+@media (max-width: 600px) {
+    .auth-card {
+        padding: 1.8rem 1.4rem;
+    }
+
+    .auth-title {
+        font-size: 1.4rem;
+    }
+
+    .auth-subtitle {
+        font-size: 0.85rem;
+    }
+}
+
+
+/* ====== HEADER / NAVBAR ====== */
+
+.header {
+    width: 100%;
+    padding: 0.6rem 2.8rem;
+    background: rgba(3, 7, 22, 0.96);
+    border-bottom: 1px solid rgba(120, 172, 255, 0.18);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.5rem;
+    position: sticky;
+    top: 0;
+    z-index: 50;
+}
+
+/* Logo kutusu + "Drone Sistemi" yazısı */
+.logo-box {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.6rem;
+    padding: 0.35rem 0.9rem;
+    border-radius: 999px;
+    background: radial-gradient(circle at left top, #4f8cff 0, #050814 55%);
+    box-shadow: 0 8px 18px rgba(64, 120, 255, 0.45);
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+.logo-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #f9fafb;
+    letter-spacing: 0.04em;
+}
+
+/* NAVBAR */
+
+.nav {
+    flex: 1;
+}
+
+.nav-list {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 1.2rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    flex-wrap: wrap;
+}
+
+.nav-list li {
+    margin: 0;
+    padding: 0;
+}
+
+.nav-list a {
+    position: relative;
+    display: inline-block;
+    padding: 0.35rem 0.75rem;
+    border-radius: 999px;
+    font-size: 0.92rem;
+    font-weight: 400;
+    text-decoration: none;
+    color: #e5e7f5;
+    background: rgba(79, 140, 255, 0.16);
+    transition: color 0.18s ease, transform 0.15s ease;
+}
+
+.nav-list a::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: 0;
+    width: 0;
+    height: 2px;
+    background: linear-gradient(90deg, #4f8cff, #5bffdb);
+    border-radius: 999px;
+    transform: translateX(-50%);
+    transition: width 0.18s ease;
+}
+
+.nav-list a:hover {
+    color: #ffffff;
+    background: rgba(79, 140, 255, 0.16);
+    transform: translateY(-1px);
+}
+
+.nav-list a:hover::after {
+    width: 60%;
+}
+
+/* Küçük ekran header uyumu */
+
+@media (max-width: 769px) {
+    .header {
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 0.6rem 1.2rem;
+        gap: 0.6rem;
+    }
+
+    .logo-box {
+        align-self: center;
+        margin-bottom: 0.2rem;
+    }
+
+    .nav {
+        width: 100%;
+    }
+
+    .nav-list {
+        justify-content: center;
+        row-gap: 0.4rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .logo-title {
+        font-size: 1rem;
+    }
+
+    .nav-list {
+        gap: 0.7rem;
+    }
+}
+
+/* ====== ŞİFREMİ UNUTTUM'A ÖZEL ====== */
+
+.reset-card {
+    max-width: 420px;
+}
+
+.reset-description {
+    margin-bottom: 1.3rem;
+}
+
+.reset-back-link {
+    margin-top: 1rem;
+    font-size: 0.85rem;
+    color: #aeb4c7;
+    text-align: center;
+}
+
+.link-accent {
+    font-size: 0.85rem;
+    color: #5b8dff;
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.link-accent:hover {
+    text-decoration: underline;
+}
+
+/* FOOTER */
+
+.site-footer {
+    width: 100%;
+    padding: 0.8rem 1.5rem;
+    text-align: center;
+    font-size: 0.85rem;
+    color: #9ca3af;
+    background: rgba(3, 7, 22, 0.98);
+    border-top: 1px solid rgba(120, 172, 255, 0.18);
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.6);
+}
+
+@media (max-width: 600px) {
+    .site-footer {
+        font-size: 0.8rem;
+        padding: 0.7rem 1rem;
+    }
+}

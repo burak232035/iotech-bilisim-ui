@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Akıllı Kampüs - Yeni Kullanıcı Kaydı</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Genel stiller (header, renkler vs.) -->
+    <link rel="stylesheet" href="style.css">
+    <!-- Kayıt sayfasına özel stiller -->
+    <link rel="stylesheet" href="kayit.css">
+</head>
+
+<body class="auth-body">
+    <!-- HEADER (giriş sayfasındaki ile aynı) -->
+    <header class="header">
+        <div class="logo-box">
+            <span class="logo-title">Drone Sistemi</span>
+        </div>
+        <nav class="nav">
+            <ul class="nav-list">
+                <li><a href="../anasayfa/index.html">Ana Sayfa</a></li>
+                <li><a href="../hakkimizda_ekrani/hakkimizda.html">Hakkımızda</a></li>
+                <li><a href="../projeler/projeler.html">Projeler</a></li>
+                <li><a href="../iletisim/iletisim.html">İletişim</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <!-- ANA İÇERİK -->
+    <main class="auth-main">
+        <section class="auth-card register-card">
+            <h1 class="auth-title">Yeni Kullanıcı Oluştur</h1>
+            <p class="auth-subtitle">
+                Akıllı Kampüs yönetim paneline erişmek için yeni bir hesap oluşturun.
+            </p>
+
+            <form id="registerForm" class="auth-form">
+                <div class="form-group">
+                    <label for="fullName">Ad Soyad</label>
+                    <input type="text" id="fullName" name="fullName" placeholder="Örn: Ad - Soyad" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="email">E-posta Adresi</label>
+                    <input type="email" id="email" name="email" placeholder="ornek@kampus.edu.tr" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="username">Kullanıcı Adı</label>
+                    <input type="text" id="username" name="username" placeholder="Örn: admin1234" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="password">Şifre</label>
+                    <input type="password" id="password" name="password" placeholder="En az 6 karakter" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="confirmPassword">Şifre (Tekrar)</label>
+                    <input type="password" id="confirmPassword" name="confirmPassword"
+                        placeholder="Şifrenizi tekrar girin" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="role">Rol</label>
+                    <select id="role" name="role" required>
+                        <option value="">Rol seçin</option>
+                        <option value="admin">Yönetici</option>
+                        <option value="operator">Operatör</option>
+                        <option value="viewer">Sadece Görüntüleme</option>
+                    </select>
+                </div>
+
+                <div class="form-group kvkk-group">
+                    <label class="remember-me">
+                        <input type="checkbox" id="acceptKvkk" required>
+                        KVKK ve gizlilik koşullarını okudum, kabul ediyorum.
+                    </label>
+                </div>
+
+                <button type="submit" class="btn primary-btn full-width">
+                    Kaydı Tamamla
+                </button>
+
+                <p id="registerError" class="form-error" hidden></p>
+
+                <p class="register-login-link">
+                    Zaten bir hesabın var mı?
+                    <a href="giris.html" class="link-accent">Giriş yap</a>
+                </p>
+            </form>
+        </section>
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="site-footer">
+        IOTECH Yazılım - 2023
+    </footer>
+
+    <!-- JS Dosyaları -->
+    <script src="giris.js"></script> <!-- genel script'in varsa -->
+    <script src="kayit.js"></script> <!-- kayıt sayfasına özel script -->
+</body>
+
+</html>

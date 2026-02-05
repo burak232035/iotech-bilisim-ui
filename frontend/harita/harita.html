@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Drone Sistemi Dashboard</title>
+
+  <!-- AdminLTE & Bootstrap -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/admin-lte@3.2/dist/css/adminlte.min.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free/css/all.min.css" />
+
+  <!-- Projeye ait stiller -->
+  <link rel="stylesheet" href="harita.css">
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
+</head>
+
+<body class="hold-transition">
+  <div class="wrapper">
+
+    <!-- HEADER -->
+    <header class="header">
+      <div class="logo-box">
+        <span class="logo-title">Drone Sistemi</span>
+      </div>
+      <nav class="nav">
+        <ul class="nav-list">
+          <li><a href="../anasayfa/index.html">Ana Sayfa</a></li>
+          <li><a href="../hakkimizda_ekrani/hakkimizda.html">Hakkımızda</a></li>
+          <li><a href="../projeler/projeler.html">Projeler</a></li>
+          <li><a href="../iletisim/iletisim.html">İletişim</a></li>
+          <li><a href="../giris_ekrani/giris.html">Giriş</a></li>
+        </ul>
+      </nav>
+    </header>
+
+    <!-- CONTENT -->
+    <div class="content-wrapper">
+      <section class="content-header">
+        <div class="container-fluid">
+          <h4>Drone Telemetri & Alan Analizi Dashboard</h4>
+        </div>
+      </section>
+
+      <section class="content">
+        <div class="container-fluid">
+
+          <!-- MAP -->
+          <div class="row">
+            <div class="col-12">
+              <div class="card card-primary">
+                <div class="card-header">
+                  <h3 class="card-title">Fırat Üniversitesi Mühendislik Fakültesi Drone Konumu</h3>
+                </div>
+                <div class="card-body">
+                  <div id="map" style="min-height:350px;"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- TELEMETRİ + DURUM KARTLARI -->
+          <div class="row mt-3">
+            <!-- Batarya -->
+            <div class="col-md-3 mb-3">
+              <div class="card card-info text-center">
+                <div class="card-header">
+                  <h3 class="card-title">
+                    <i class="fas fa-battery-half"></i> Drone Bataryası
+                  </h3>
+                </div>
+
+                <div class="card-body d-flex flex-column align-items-center justify-content-center">
+                  <svg width="120" height="120">
+                    <!-- Arka çember -->
+                    <circle cx="60" cy="60" r="50" stroke="#e5e7eb" stroke-width="10" fill="none" />
+
+                    <!-- Dolan çember -->
+                    <circle id="batteryCircle" cx="60" cy="60" r="50" stroke="#16a34a" stroke-width="10" fill="none"
+                      stroke-dasharray="314" stroke-dashoffset="314" stroke-linecap="round"
+                      transform="rotate(-90 60 60)" />
+
+                    <!-- Yüzde yazısı -->
+                    <text id="batteryValue" x="60" y="68" text-anchor="middle" font-size="20" font-weight="bold"
+                      fill="#16a34a">%0</text>
+                  </svg>
+
+                  <small id="batteryMeta" class="text-muted mt-2">Son güncelleme: --</small>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tarama oranı -->
+            <div class="col-md-3">
+              <div class="card card-success text-center">
+                <div class="card-header">
+                  <h3 class="card-title">
+                    <i class="fas fa-radar"></i> Tarama Oranı
+                  </h3>
+                </div>
+
+                <div class="card-body d-flex justify-content-center">
+                  <svg width="120" height="120">
+                    <!-- Arka çember -->
+                    <circle cx="60" cy="60" r="50" stroke="#e5e7eb" stroke-width="10" fill="none" />
+                    <!-- Dolan çember -->
+                    <circle id="scanCircle" cx="60" cy="60" r="50" stroke="#16a34a" stroke-width="10" fill="none"
+                      stroke-dasharray="314" stroke-dashoffset="314" stroke-linecap="round"
+                      transform="rotate(-90 60 60)" />
+                    <!-- Yüzde -->
+                    <text id="scanPercentValue" x="60" y="68" text-anchor="middle" font-size="20" font-weight="bold"
+                      fill="#16a34a">
+                      %0
+                    </text>
+                  </svg>
+                </div>
+              </div>
+            </div>
+
+
+            <!-- Seçili alan -->
+            <div class="col-md-3 mb-3">
+              <div class="card card-light">
+                <div class="card-header">
+                  <h3 class="card-title"><i class="fas fa-draw-polygon"></i> Seçili Alan</h3>
+                </div>
+                <div class="card-body">
+                  <div><strong id="selectedAreaName">Seçilmedi</strong></div>
+                  <small id="selectedAreaHint" class="text-muted">Lejanttan veya haritadaki polygona tıklayarak
+                    seç.</small>
+                </div>
+              </div>
+            </div>
+
+            <!-- Bağlantı durumu -->
+            <div class="col-md-3 mb-3">
+              <div class="card card-light">
+                <div class="card-header">
+                  <h3 class="card-title"><i class="fas fa-plug"></i> Bağlantı</h3>
+                </div>
+                <div class="card-body">
+                  <div class="d-flex align-items-center justify-content-between">
+                    <span>Socket:</span>
+                    <span id="socketStatus" class="badge badge-danger">
+                      <span id="socketStatusText">Bağlantı Yok</span>
+                    </span>
+                  </div>
+                  <div class="d-flex align-items-center justify-content-between mt-2">
+                    <span>Drone:</span>
+                    <span id="androidStatus" class="badge badge-secondary">
+                      <span id="androidStatusText">Bilinmiyor</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- GIMBAL, ALTITUDE, GPS KARTLARI -->
+          <div class="row mt-3">
+            <!-- Gimbal -->
+            <div class="col-md-4 mb-3">
+              <div class="card card-warning">
+                <div class="card-header">
+                  <h3 class="card-title"><i class="fas fa-video"></i> Gimbal (Kamera)</h3>
+                </div>
+                <div class="card-body">
+                  <div class="d-flex justify-content-between mb-2">
+                    <span>Pitch (Yukarı/Aşağı):</span>
+                    <strong id="gimbalPitch" class="text-primary">--</strong>
+                  </div>
+                  <div class="d-flex justify-content-between mb-2">
+                    <span>Roll (Yatış):</span>
+                    <strong id="gimbalRoll" class="text-primary">--</strong>
+                  </div>
+                  <div class="d-flex justify-content-between">
+                    <span>Yaw (Dönüş):</span>
+                    <strong id="gimbalYaw" class="text-primary">--</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Altitude -->
+            <div class="col-md-4 mb-3">
+              <div class="card card-info">
+                <div class="card-header">
+                  <h3 class="card-title"><i class="fas fa-arrows-alt-v"></i> Yükseklik</h3>
+                </div>
+                <div class="card-body">
+                  <div class="d-flex justify-content-between mb-2">
+                    <span>Yerden Yükseklik (AGL):</span>
+                    <strong id="altitudeAgl" class="text-success">-- m</strong>
+                  </div>
+                  <div class="d-flex justify-content-between">
+                    <span>Deniz Seviyesi (AMSL):</span>
+                    <strong id="altitudeAmsl" class="text-success">-- m</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- GPS -->
+            <div class="col-md-4 mb-3">
+              <div class="card card-primary">
+                <div class="card-header">
+                  <h3 class="card-title"><i class="fas fa-satellite"></i> GPS</h3>
+                </div>
+                <div class="card-body">
+                  <div class="d-flex justify-content-between mb-2">
+                    <span>Sinyal Kalitesi:</span>
+                    <span id="gpsSignal" class="badge badge-secondary">--</span>
+                  </div>
+                  <div class="d-flex justify-content-between">
+                    <span>Uydu Sayısı:</span>
+                    <strong id="gpsSatellite" class="text-info">-- uydu</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- DRONE KONTROL BUTONLARI -->
+          <div class="row mt-3">
+            <div class="col-12">
+              <div class="card card-danger">
+                <div class="card-header">
+                  <h3 class="card-title"><i class="fas fa-gamepad"></i> Drone Kontrol</h3>
+                </div>
+                <div class="card-body">
+                  <div class="d-flex justify-content-center gap-3">
+                    <button type="button" class="btn btn-success btn-lg" onclick="droneTakeoff()">
+                      <i class="fas fa-plane-departure"></i> Kalkış (Takeoff)
+                    </button>
+                    <button type="button" class="btn btn-warning btn-lg" onclick="droneLand()">
+                      <i class="fas fa-plane-arrival"></i> İniş (Land)
+                    </button>
+                  </div>
+                  <p class="text-center text-muted mt-3 mb-0">
+                    <small><i class="fas fa-info-circle"></i> Butonlar drone'a komut gönderir. Drone bulunduğu alanda işlem yapar.</small>
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ACTION BUTTONS -->
+          <div class="row mt-2">
+            <div class="col-md-3 mb-3">
+              <button type="button" class="card action-card bg-primary" onclick="startExploration()">
+                <div class="card-body action-card-body">
+                  <i class="fas fa-route"></i>
+                  <span>Alan Keşfi</span>
+                </div>
+              </button>
+            </div>
+
+            <div class="col-md-3 mb-3">
+              <button type="button" class="card action-card bg-info" onclick="startScan()">
+                <div class="card-body action-card-body">
+                  <i class="fas fa-search"></i>
+                  <span>Alan Tarama</span>
+                </div>
+              </button>
+            </div>
+
+            <div class="col-md-3 mb-3">
+              <button type="button" class="card action-card bg-warning" onclick="returnToStation()">
+                <div class="card-body action-card-body">
+                  <i class="fas fa-home"></i>
+                  <span>İstasyona Dön</span>
+                </div>
+              </button>
+            </div>
+
+            <div class="col-md-3 mb-3">
+              <button type="button" class="card action-card bg-danger" onclick="manualControl()">
+                <div class="card-body action-card-body">
+                  <i class="fas fa-gamepad"></i>
+                  <span>Elle Kontrol</span>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          <!-- RAPOR -->
+          <div class="row mt-2">
+            <div class="col-md-6">
+              <div class="card card-warning">
+                <div class="card-header">
+                  <h3 class="card-title"><i class="fas fa-trash"></i> Yeni Atık</h3>
+                </div>
+                <div class="card-body">
+                  <ul class="mb-0">
+                    <li>Kategori: <span id="atikKategori">Plastik</span></li>
+                    <li>Koordinat: <span id="atikKoordinat">--</span></li>
+                    <li>Zaman: <span id="atikZaman">--</span></li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-md-6">
+              <div class="card card-success">
+                <div class="card-header">
+                  <h3 class="card-title"><i class="fas fa-file-pdf"></i> Rapor</h3>
+                </div>
+                <div class="card-body">
+                  <button type="button" id="raporOlusturBtn" class="btn btn-success btn-block">
+                    Seçili Alanın Raporunu Oluştur (PDF)
+                  </button>
+                  <small id="raporDurum" class="d-block mt-2"></small>
+                </div>
+              </div>
+            </div>
+          </div>
+
+
+
+
+          <!-- RAPOR -->
+          <div class="row mt-3">
+            <div class="col-md-6">
+              <div class="card card-warning">
+                <div class="card-header">
+                  <h3 class="card-title"><i class="fas fa-trash"></i> Yeni Atık</h3>
+                </div>
+                <div class="card-body">
+                  <ul class="mb-0">
+                    <li>Kategori: <span id="atikKategori">Plastik</span></li>
+                    <li>Koordinat: <span id="atikKoordinat">38.6829, 39.9156</span></li>
+                    <li>Zaman: <span id="atikZaman">--</span></li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-md-6">
+              <div class="card card-success">
+                <div class="card-header">
+                  <h3 class="card-title"><i class="fas fa-file-pdf"></i> Rapor</h3>
+                </div>
+                <div class="card-body">
+                  <button type="button" id="raporOlusturBtn" class="btn btn-success btn-block">
+                    Rapor Oluştur (PDF)
+                  </button>
+                  <small id="raporDurum" class="d-block mt-2"></small>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+    </div>
+
+    <footer class="site-footer">
+      IOTECH Yazılım - 2023
+    </footer>
+
+  </div>
+
+  <!-- JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/admin-lte@3.2/dist/js/adminlte.min.js"></script>
+
+
+  <script src="http://localhost:3001/socket.io/socket.io.js"></script>
+
+  <!-- Proje JS -->
+  <script src="harita.js"></script>
+
+  <!-- ✅ Sayfa içi küçük yardımcılar (atik zaman + rapor indir) -->
+  <script>
+    // 1) Zamanı doldur
+    const elZaman = document.getElementById("atikZaman");
+    if (elZaman) {
+      elZaman.textContent = new Date().toLocaleString("tr-TR");
+    }
+
+    // 2) Rapor indir (backend PDF endpoint)
+    const raporBtn = document.getElementById("raporOlusturBtn");
+    const raporDurum = document.getElementById("raporDurum");
+
+    async function raporIndir() {
+      const API_URL = "http://localhost:3001/api/reports/generate";
+
+      try {
+        raporBtn.disabled = true;
+        raporBtn.textContent = "Rapor oluşturuluyor...";
+        if (raporDurum) {
+          raporDurum.className = "text-muted";
+          raporDurum.textContent = "Backend’e istek gönderildi, PDF hazırlanıyor...";
+        }
+
+        // şimdilik body göndermiyoruz; ileride seçilen polygon points göndereceğiz
+        const res = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({})
+        });
+
+        if (!res.ok) {
+          const t = await res.text().catch(() => "");
+          throw new Error(`Backend hata: ${res.status} ${t}`);
+        }
+
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "rapor.pdf";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+
+        window.URL.revokeObjectURL(url);
+
+        if (raporDurum) {
+          raporDurum.className = "text-success";
+          raporDurum.textContent = "PDF indirildi ✅";
+        }
+      } catch (err) {
+        console.error(err);
+        if (raporDurum) {
+          raporDurum.className = "text-danger";
+          raporDurum.textContent = "PDF oluşturulamadı. Backend çalışıyor mu? (localhost:3001)";
+        }
+        alert("PDF oluşturulamadı. Backend çalışıyor mu? (localhost:3001)");
+      } finally {
+        raporBtn.disabled = false;
+        raporBtn.textContent = "Rapor Oluştur (PDF)";
+      }
+    }
+
+    if (raporBtn) {
+      raporBtn.addEventListener("click", raporIndir);
+    }
+  </script>
+
+</body>
+
+</html>

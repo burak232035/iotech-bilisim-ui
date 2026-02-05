@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Akıllı Kampüs | Hakkımızda</title>
+
+    <!-- Ortak stiller (header/footer burada) -->
+    <link rel="stylesheet" href="../harita/harita.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free/css/all.min.css" />
+    <link rel="stylesheet" href="hakkimizda.css">
+
+</head>
+
+<body class="hold-transition">
+    <div class="wrapper">
+
+        <!-- HEADER (ORTAK) -->
+        <header class="header">
+            <div class="logo-box">
+                <span class="logo-title">Drone Sistemi</span>
+            </div>
+            <nav class="nav">
+                <ul class="nav-list">
+                    <li><a href="../anasayfa/index.html">Ana Sayfa</a></li>
+                    <li><a href="../hakkimizda_ekrani/hakkimizda.html" class="active">Hakkımızda</a></li>
+                    <li><a href="../projeler/projeler.html">Projeler</a></li>
+                    <li><a href="../iletisim/iletisim.html">İletişim</a></li>
+                    <li><a href="../giris_ekrani/giris.html">Giriş</a></li>
+                </ul>
+            </nav>
+        </header>
+
+        <!-- CONTENT -->
+        <main class="page-wrap">
+
+            <h1 style="margin: 0 0 1rem 0; color: #0b0f20;">
+                <!-- Not: Bu başlık AdminLTE ile siyah gelebilir; istersen beyaz yaparız -->
+                Hakkımızda
+            </h1>
+
+            <!-- 1) Proje Özeti -->
+            <section class="section-card">
+                <h2><i class="fas fa-info-circle"></i> Proje Özeti</h2>
+                <p>
+                    <strong>Akıllı Kampüs Drone Sistemi</strong>, kampüs içinde otonom drone görevleri ile
+                    çevresel gözlem, alan analizi ve atık sınıflandırmasını destekleyen bir izleme platformudur.
+                    Haritalama katmanında Azure Maps kullanılır; tespit/analiz katmanında görüntü işleme modelleri ile
+                    veri üretimi hedeflenir.
+                </p>
+
+            </section>
+
+            <!-- 2) Misyon & Vizyon -->
+            <div class="two-col">
+                <section class="section-card">
+                    <h2><i class="fas fa-bullseye"></i> Misyon</h2>
+                    <ul>
+                        <li>Kampüs yaşam kalitesini artıracak çevresel analizler üretmek.</li>
+                        <li>Drone telemetrisi ve görüntü analiziyle sürdürülebilir veri toplamak.</li>
+                        <li>Atık yönetimi ve alan kullanımı için ölçülebilir metrikler sunmak.</li>
+                    </ul>
+                </section>
+
+                <section class="section-card">
+                    <h2><i class="fas fa-eye"></i> Vizyon</h2>
+                    <ul>
+                        <li>Akıllı kampüsleri veri odaklı karar mekanizmalarıyla güçlendirmek.</li>
+                        <li>Otonom görev senaryolarını gerçek zamanlı haritalama ile birleştirmek.</li>
+                        <li>Farklı kampüslere kolay uyarlanabilir bir platform standardı oluşturmak.</li>
+                    </ul>
+                </section>
+            </div>
+
+            <!-- 3) Neler Yapıyoruz -->
+            <section class="section-card">
+                <h2><i class="fas fa-cogs"></i> Neler Yapıyoruz?</h2>
+                <ul>
+                    <li><strong>Harita Tabanlı İzleme:</strong> Drone konumu ve görev durumunu harita üzerinde
+                        göstermek.</li>
+                    <li><strong>Telemetri Takibi:</strong> Şarj, görev modu ve tarama yüzdesi gibi verileri panelde
+                        sunmak.</li>
+                    <li><strong>Alan Analizi:</strong> Yeşil/beton oranı gibi kampüs metrikleri üretmek.</li>
+                    <li><strong>Atık Sınıflandırma:</strong> Metal, plastik, cam vb. sınıfları yüzdesel raporlamak.</li>
+                </ul>
+            </section>
+
+            <!-- 4) Kullanılan Teknolojiler -->
+            <section class="section-card">
+                <h2><i class="fas fa-layer-group"></i> Kullanılan Teknolojiler</h2>
+                <div>
+                    <span class="badge">AdminLTE</span>
+                    <span class="badge">HTML / CSS / JS</span>
+                    <span class="badge">Azure Maps</span>
+                    <span class="badge">Drone Telemetri</span>
+                    <span class="badge">Görüntü İşleme</span>
+                    <span class="badge">API (Planlı)</span>
+                    <span class="badge">WebSocket (Planlı)</span>
+                </div>
+                <p class="note">
+                    İstersen burayı “YOLO / RF-DETR / Roboflow / Node.js / React” gibi proje gerçeklerinle genişletiriz.
+                </p>
+            </section>
+
+            <!-- 5) Yol Haritası -->
+            <section class="section-card">
+                <h2><i class="fas fa-road"></i> Yol Haritası</h2>
+                <ol>
+                    <li><strong>Arayüz Tamamlama:</strong> Sayfalar (Ana Sayfa, Hakkımızda, Harita, İletişim).</li>
+                    <li><strong>Yetkilendirme:</strong> Giriş yaptıktan sonra dashboard erişimi.</li>
+                    <li><strong>Gerçek Telemetri:</strong> Drone’dan veri çekme (SDK / server).</li>
+                    <li><strong>Analiz & Raporlama:</strong> Atık/alan metriklerinin kaydı ve grafikleri.</li>
+                </ol>
+
+                <div class="cta-row">
+                    <a class="cta-btn cta-primary" href="harita.html">
+                        <i class="fas fa-tachometer-alt"></i> Dashboard’a Git
+                    </a>
+                    <a class="cta-btn cta-secondary" href="iletisim.html">
+                        <i class="fas fa-envelope"></i> İletişim
+                    </a>
+                </div>
+            </section>
+
+        </main>
+
+        <!-- FOOTER (ORTAK) -->
+        <footer class="site-footer">
+            IOTECH Yazılım - 2023
+        </footer>
+
+    </div>
+</body>
+
+</html>

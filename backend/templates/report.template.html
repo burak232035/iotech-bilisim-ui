@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    body { font-family: Arial, sans-serif; font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; }
+    td, th { border: 1px solid #000; padding: 6px; vertical-align: top; }
+    h2 { margin: 0 0 10px 0; }
+    h3 { margin: 18px 0 8px 0; }
+    .no-border td { border: none; }
+    .muted { color: #444; font-size: 11px; }
+  </style>
+</head>
+<body>
+
+  <table class="no-border">
+    <tr>
+      <td style="width:60%;">
+        <h2>Akıllı Kampüs Atık Analiz Raporu</h2>
+        <span class="muted">Otomatik oluşturulmuştur</span>
+      </td>
+      <td style="width:40%; text-align:right;">
+        <span class="muted">Rapor No: {{raporNo}}</span>
+      </td>
+    </tr>
+  </table>
+
+  <table>
+    <tr>
+      <td style="width:60%;">
+        <!-- SOL ÜST TABLO (BİREBİR) -->
+        <table>
+          <tr><td>Vaka Etiketi</td><td>{{vakaEtiketi}}</td></tr>
+          <tr><td>Uçuş Tarihi</td><td>{{ucusTarihi}}</td></tr>
+          <tr><td>Uçuş Saati</td><td>{{ucusSaati}}</td></tr>
+          <tr><td>Analiz Tarihi</td><td>{{analizTarihi}}</td></tr>
+          <tr><td>Analiz Saati</td><td>{{analizSaati}}</td></tr>
+          <tr><td>Başlangıç Koordinatları</td><td>{{baslangic}}</td></tr>
+          <tr><td>Bitiş Koordinatları</td><td>{{bitis}}</td></tr>
+          <tr><td>Tarama Mesafesi</td><td>{{taramaMesafesi}}</td></tr>
+          <tr><td>Uçuş Süresi</td><td>{{ucusSuresi}}</td></tr>
+          <tr><td>Genel Değerlendirme</td><td>{{genelDegerlendirme}}</td></tr>
+          <tr><td>Toplam Frame</td><td>{{toplamFrame}}</td></tr>
+          <tr><td>Rapor Stride</td><td>{{raporStride}}</td></tr>
+        </table>
+      </td>
+
+      <td style="width:40%;">
+        <!-- SAĞ: TARANAN ALAN GÖRSELİ -->
+        <div style="font-weight:bold; margin-bottom:6px;">Taranan Alan Görseli</div>
+        <img src="{{haritaGorseli}}" style="width:100%; border:1px solid #000;" />
+      </td>
+    </tr>
+  </table>
+
+  <h3>Kategori Bazlı Atık Sonuçları</h3>
+  <table>
+    <tr>
+      <th>Kategori</th>
+      <th>Tespit Sayısı</th>
+      <th>Oran (%)</th>
+    </tr>
+    {{kategoriSatirlari}}
+  </table>
+
+  {{opsiyonelAlanlar}}
+
+</body>
+</html>
