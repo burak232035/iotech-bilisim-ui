@@ -15,6 +15,35 @@ import { GpsCard } from '@components/telemetry/GpsCard';
 import { DroneControls } from '@components/dashboard/DroneControls';
 import { ActionButtons } from '@components/dashboard/ActionButtons';
 import { ReportGenerator } from '@components/dashboard/ReportGenerator';
+import { MissionPlanner } from '@components/dashboard/MissionPlanner';
+import { useMap } from '@contexts/MapContext';
+
+function PhotoOverlayPanel() {
+  const { photoCount, clearPhotoOverlays } = useMap();
+  if (photoCount === 0) return null;
+  return (
+    <div style={{
+      position: 'absolute', top: 10, left: 10, zIndex: 1000,
+      background: 'rgba(0,0,0,0.72)', color: '#fff',
+      borderRadius: 8, padding: '6px 12px',
+      display: 'flex', alignItems: 'center', gap: 10,
+      fontSize: '0.82rem', backdropFilter: 'blur(4px)',
+      border: '1px solid rgba(255,255,255,0.15)'
+    }}>
+      <span>📷 <strong>{photoCount}</strong> fotoğraf haritada</span>
+      <button
+        onClick={clearPhotoOverlays}
+        style={{
+          background: 'rgba(239,68,68,0.7)', border: 'none',
+          color: '#fff', borderRadius: 4, padding: '2px 10px',
+          cursor: 'pointer', fontSize: '0.73rem', fontWeight: 600
+        }}
+      >
+        Temizle
+      </button>
+    </div>
+  );
+}
 
 export default function DashboardPage() {
   return (
@@ -37,6 +66,8 @@ export default function DashboardPage() {
               >
                 <div style={{ position: 'relative' }}>
                   <LeafletMap />
+                  {/* Photo overlay counter */}
+                  <PhotoOverlayPanel />
                   {/* Area Legend positioned over map */}
                   <div
                     style={{
@@ -68,6 +99,9 @@ export default function DashboardPage() {
               <GpsCard />
             </div>
           </div>
+
+          {/* WAYPOINT MISSION PLANNER */}
+          <MissionPlanner />
 
           {/* DRONE CONTROLS */}
           <DroneControls />

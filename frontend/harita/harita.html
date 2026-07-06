@@ -94,15 +94,15 @@
             </div>
 
             <!-- Tarama oranı -->
-            <div class="col-md-3">
+            <div class="col-md-3 mb-3">
               <div class="card card-success text-center">
                 <div class="card-header">
                   <h3 class="card-title">
-                    <i class="fas fa-radar"></i> Tarama Oranı
+                    <i class="fas fa-circle-notch" style="color:#fff;"></i> Tarama Oranı
                   </h3>
                 </div>
 
-                <div class="card-body d-flex justify-content-center">
+                <div class="card-body d-flex flex-column align-items-center justify-content-center">
                   <svg width="120" height="120">
                     <!-- Arka çember -->
                     <circle cx="60" cy="60" r="50" stroke="#e5e7eb" stroke-width="10" fill="none" />
@@ -318,43 +318,188 @@
             </div>
           </div>
 
+        </div>
+      </section>
+    </div>
 
+    <!-- ALAN TARAMA MODALI -->
+    <div id="taramaBackdrop" class="modal-backdrop-custom" style="display:none;"></div>
+    <div id="taramaModal" style="display:none;">
+      <div class="tarama-dialog">
+        <div class="tarama-header">
+          <h5><i class="fas fa-route"></i> Alan Tarama Planı</h5>
+          <button type="button" id="taramaKapat" class="rapor-modal-close">&times;</button>
+        </div>
+        <div class="tarama-body">
 
-
-          <!-- RAPOR -->
-          <div class="row mt-3">
-            <div class="col-md-6">
-              <div class="card card-warning">
-                <div class="card-header">
-                  <h3 class="card-title"><i class="fas fa-trash"></i> Yeni Atık</h3>
-                </div>
-                <div class="card-body">
-                  <ul class="mb-0">
-                    <li>Kategori: <span id="atikKategori">Plastik</span></li>
-                    <li>Koordinat: <span id="atikKoordinat">38.6829, 39.9156</span></li>
-                    <li>Zaman: <span id="atikZaman">--</span></li>
-                  </ul>
-                </div>
+          <div class="tarama-settings-grid">
+            <div class="tarama-setting-item">
+              <label class="tarama-label"><i class="fas fa-ruler-horizontal"></i> Şerit Genişliği</label>
+              <div class="tarama-input-wrap">
+                <input type="number" id="stripWidth" value="20" min="5" max="100" step="5" class="form-control form-control-sm tarama-input">
+                <span class="tarama-unit">m</span>
               </div>
             </div>
-
-            <div class="col-md-6">
-              <div class="card card-success">
-                <div class="card-header">
-                  <h3 class="card-title"><i class="fas fa-file-pdf"></i> Rapor</h3>
-                </div>
-                <div class="card-body">
-                  <button type="button" id="raporOlusturBtn" class="btn btn-success btn-block">
-                    Rapor Oluştur (PDF)
-                  </button>
-                  <small id="raporDurum" class="d-block mt-2"></small>
-                </div>
+            <div class="tarama-setting-item">
+              <label class="tarama-label"><i class="fas fa-arrows-alt-v"></i> Uçuş Yüksekliği</label>
+              <div class="tarama-input-wrap">
+                <input type="number" id="flightAltitude" value="50" min="10" max="120" step="10" class="form-control form-control-sm tarama-input">
+                <span class="tarama-unit">m</span>
+              </div>
+            </div>
+            <div class="tarama-setting-item">
+              <label class="tarama-label"><i class="fas fa-shield-alt"></i> Güvenlik Tamponu</label>
+              <div class="tarama-input-wrap">
+                <input type="number" id="safetyBuffer" value="5" min="2" max="30" step="1" class="form-control form-control-sm tarama-input">
+                <span class="tarama-unit">m</span>
               </div>
             </div>
           </div>
 
+          <div id="routeInfo" class="route-info-box" style="display:none;">
+            <div class="route-info-row">
+              <span><i class="fas fa-map-marker-alt"></i> Toplam Waypoint</span>
+              <strong id="waypointCount">-</strong>
+            </div>
+            <div class="route-info-row">
+              <span><i class="fas fa-road"></i> Tahmini Mesafe</span>
+              <strong id="routeDistance">-</strong>
+            </div>
+            <div class="route-info-row">
+              <span><i class="fas fa-clock"></i> Tahmini Süre (5 m/s)</span>
+              <strong id="routeTime">-</strong>
+            </div>
+            <div class="route-info-row">
+              <span><i class="fas fa-exclamation-triangle"></i> Kayıtlı Engel</span>
+              <strong id="obstacleCount" class="text-warning">0</strong>
+            </div>
+          </div>
+
+          <div id="routeStatusMsg" class="tarama-status-msg" style="display:none;"></div>
+
         </div>
-      </section>
+        <div class="tarama-footer">
+          <button class="btn btn-secondary btn-sm" id="taramaIptal">İptal</button>
+          <button class="btn btn-info btn-sm" id="rotayiHesapla">
+            <i class="fas fa-calculator"></i> Rotayı Hesapla
+          </button>
+          <button class="btn btn-success btn-sm" id="taramaBaslat" disabled>
+            <i class="fas fa-play"></i> Taramayı Başlat
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ELLE KONTROL MODALI -->
+    <div id="elleKontrolBackdrop" class="modal-backdrop-custom" style="display:none;"></div>
+    <div id="elleKontrolModal" style="display:none;">
+      <div class="elle-kontrol-dialog">
+        <div class="elle-kontrol-header">
+          <h5><i class="fas fa-gamepad"></i> Elle Kontrol &mdash; DJI Mini 4 Pro</h5>
+          <div class="elle-kontrol-header-btns">
+            <span id="elleKontrolModeLabel" class="badge badge-info">MOD: NORMAL</span>
+            <button type="button" id="elleKontrolKapat" class="rapor-modal-close">&times;</button>
+          </div>
+        </div>
+        <div class="elle-kontrol-body">
+
+          <!-- Sol çubuk: Gaz + Yaw -->
+          <div class="joystick-section">
+            <div class="joystick-label-top">Sol Çubuk</div>
+            <div class="joystick-container" id="leftJoystick">
+              <div class="joystick-base">
+                <div class="joystick-knob" id="leftKnob"></div>
+                <div class="joystick-axes-label">
+                  <span class="j-label j-label-top">Yüksel</span>
+                  <span class="j-label j-label-bottom">Alçal</span>
+                  <span class="j-label j-label-left">Sol</span>
+                  <span class="j-label j-label-right">Sağ</span>
+                </div>
+              </div>
+            </div>
+            <div class="joystick-label-bottom">Gaz (Yükseklik) / Yaw (Dönüş)</div>
+            <div class="joystick-value" id="leftValue">X: 0.00 &nbsp;|&nbsp; Y: 0.00</div>
+          </div>
+
+          <!-- Orta: mod + gimbal + RTH -->
+          <div class="elle-kontrol-center">
+            <div id="elleKontrolStatus" class="elle-status-badge elle-status-active">
+              <i class="fas fa-circle"></i> AKTIF
+            </div>
+            <div class="center-buttons">
+              <button class="btn btn-sm btn-outline-light speed-btn" data-speed="cine">Cine</button>
+              <button class="btn btn-sm btn-warning speed-btn active" data-speed="normal">Normal</button>
+              <button class="btn btn-sm btn-outline-light speed-btn" data-speed="sport">Sport</button>
+            </div>
+            <div class="gimbal-control">
+              <label><i class="fas fa-video"></i> Gimbal Pitch</label>
+              <input type="range" id="gimbalSlider" min="-90" max="30" value="-30" class="gimbal-slider">
+              <span id="gimbalSliderVal">-30°</span>
+            </div>
+            <button class="btn btn-danger btn-sm" id="rthFromManual">
+              <i class="fas fa-home"></i> RTH
+            </button>
+          </div>
+
+          <!-- Sağ çubuk: Pitch + Roll -->
+          <div class="joystick-section">
+            <div class="joystick-label-top">Sağ Çubuk</div>
+            <div class="joystick-container" id="rightJoystick">
+              <div class="joystick-base">
+                <div class="joystick-knob" id="rightKnob"></div>
+                <div class="joystick-axes-label">
+                  <span class="j-label j-label-top">İleri</span>
+                  <span class="j-label j-label-bottom">Geri</span>
+                  <span class="j-label j-label-left">Sol</span>
+                  <span class="j-label j-label-right">Sağ</span>
+                </div>
+              </div>
+            </div>
+            <div class="joystick-label-bottom">Pitch (İleri/Geri) / Roll (Sol/Sağ)</div>
+            <div class="joystick-value" id="rightValue">X: 0.00 &nbsp;|&nbsp; Y: 0.00</div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- RAPOR AYAR MODALI -->
+    <div id="raporAyarBackdrop" class="modal-backdrop-custom" style="display:none;"></div>
+    <div id="raporAyarModal" style="display:none;">
+      <div class="rapor-modal-dialog">
+        <div class="rapor-modal-header">
+          <h5><i class="fas fa-sliders-h"></i> Rapor Ayarları</h5>
+          <button type="button" id="raporModalKapat" class="rapor-modal-close">&times;</button>
+        </div>
+        <div class="rapor-modal-body">
+          <div class="rapor-modal-row">
+            <!-- Sol: Atık Kategorileri -->
+            <div class="rapor-modal-col">
+              <h6><i class="fas fa-trash"></i> Atık Kategorileri</h6>
+              <div class="rapor-modal-helpers">
+                <button type="button" class="btn btn-sm btn-outline-light" id="kategoriTumunuSec">Tümünü Seç</button>
+                <button type="button" class="btn btn-sm btn-outline-light" id="kategoriTumunuKaldir">Tümünü Kaldır</button>
+              </div>
+              <div id="kategoriCheckboxlar"></div>
+            </div>
+            <!-- Sağ: Drone Bilgileri -->
+            <div class="rapor-modal-col">
+              <h6><i class="fas fa-helicopter"></i> Drone Bilgileri</h6>
+              <div class="rapor-modal-helpers">
+                <button type="button" class="btn btn-sm btn-outline-light" id="droneTumunuSec">Tümünü Seç</button>
+                <button type="button" class="btn btn-sm btn-outline-light" id="droneTumunuKaldir">Tümünü Kaldır</button>
+              </div>
+              <div id="droneCheckboxlar"></div>
+            </div>
+          </div>
+        </div>
+        <div class="rapor-modal-footer">
+          <button type="button" class="btn btn-secondary" id="raporModalIptal">İptal</button>
+          <button type="button" class="btn btn-success" id="raporModalOlustur">
+            <i class="fas fa-file-pdf"></i> Raporu Oluştur
+          </button>
+        </div>
+      </div>
     </div>
 
     <footer class="site-footer">
@@ -374,72 +519,11 @@
   <!-- Proje JS -->
   <script src="harita.js"></script>
 
-  <!-- ✅ Sayfa içi küçük yardımcılar (atik zaman + rapor indir) -->
+  <!-- ✅ Sayfa içi küçük yardımcı (atık zaman) -->
   <script>
-    // 1) Zamanı doldur
     const elZaman = document.getElementById("atikZaman");
     if (elZaman) {
       elZaman.textContent = new Date().toLocaleString("tr-TR");
-    }
-
-    // 2) Rapor indir (backend PDF endpoint)
-    const raporBtn = document.getElementById("raporOlusturBtn");
-    const raporDurum = document.getElementById("raporDurum");
-
-    async function raporIndir() {
-      const API_URL = "http://localhost:3001/api/reports/generate";
-
-      try {
-        raporBtn.disabled = true;
-        raporBtn.textContent = "Rapor oluşturuluyor...";
-        if (raporDurum) {
-          raporDurum.className = "text-muted";
-          raporDurum.textContent = "Backend’e istek gönderildi, PDF hazırlanıyor...";
-        }
-
-        // şimdilik body göndermiyoruz; ileride seçilen polygon points göndereceğiz
-        const res = await fetch(API_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({})
-        });
-
-        if (!res.ok) {
-          const t = await res.text().catch(() => "");
-          throw new Error(`Backend hata: ${res.status} ${t}`);
-        }
-
-        const blob = await res.blob();
-        const url = window.URL.createObjectURL(blob);
-
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "rapor.pdf";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-
-        window.URL.revokeObjectURL(url);
-
-        if (raporDurum) {
-          raporDurum.className = "text-success";
-          raporDurum.textContent = "PDF indirildi ✅";
-        }
-      } catch (err) {
-        console.error(err);
-        if (raporDurum) {
-          raporDurum.className = "text-danger";
-          raporDurum.textContent = "PDF oluşturulamadı. Backend çalışıyor mu? (localhost:3001)";
-        }
-        alert("PDF oluşturulamadı. Backend çalışıyor mu? (localhost:3001)");
-      } finally {
-        raporBtn.disabled = false;
-        raporBtn.textContent = "Rapor Oluştur (PDF)";
-      }
-    }
-
-    if (raporBtn) {
-      raporBtn.addEventListener("click", raporIndir);
     }
   </script>
 

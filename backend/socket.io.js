@@ -129,6 +129,13 @@ function initializeSocketIO(httpServer) {
       });
     });
 
+    // Drone → Web: Command execution result (takeoff/land/hover/gimbal/emergency_land vb.)
+    socket.on("command_response", (data) => {
+      webClients.forEach((clientId) => {
+        io.to(clientId).emit("command_response", data);
+      });
+    });
+
     // Web → Drone: Control commands (takeoff, land, etc.)
     socket.on("drone_command", (command) => {
       console.log(`🎮 Drone command from ${socket.id}:`, command.command);
@@ -146,6 +153,51 @@ function initializeSocketIO(httpServer) {
             sentBy: socket.id
           });
         }
+      });
+    });
+
+    // Drone → Web: Obstacle detected (from drone sensors)
+    socket.on("obstacle_detected", (data) => {
+      console.log(`🚧 Obstacle detected from ${socket.id}:`, data);
+      webClients.forEach((clientId) => {
+        io.to(clientId).emit("obstacle_detected", data);
+      });
+    });
+
+    // Drone → Web: Waypoint mission progress updates
+    socket.on("mission_progress", (data) => {
+      webClients.forEach((clientId) => {
+        io.to(clientId).emit("mission_progress", data);
+      });
+    });
+
+    // Drone → Web: Waypoint mission completed
+    socket.on("mission_complete", (data) => {
+      console.log(`✅ Mission complete from ${socket.id}`);
+      webClients.forEach((clientId) => {
+        io.to(clientId).emit("mission_complete", data);
+      });
+    });
+
+    // Drone → Web: Mission stopped/aborted
+    socket.on("mission_stopped", (data) => {
+      console.log(`🛑 Mission stopped from ${socket.id}`);
+      webClients.forEach((clientId) => {
+        io.to(clientId).emit("mission_stopped", data);
+      });
+    });
+
+    // Drone → Web: Camera photo with GPS coordinates for map overlay
+    // Expected: { imageBase64, lat, lon, altitude, heading, timestamp }
+    // imageBase64 should be a compressed JPEG thumbnail (~100 KB max)
+    socket.on("drone_photo", (data) => {
+      if (!data?.imageBase64 || !data?.lat || !data?.lon) {
+        console.warn("⚠️  drone_photo: eksik alan (imageBase64, lat, lon zorunlu)");
+        return;
+      }
+      console.log(`📷 Photo from drone: ${data.lat.toFixed(5)}, ${data.lon.toFixed(5)} @ ${data.altitude ?? '?'}m`);
+      webClients.forEach((clientId) => {
+        io.to(clientId).emit("drone_photo", data);
       });
     });
 
@@ -198,8 +250,35 @@ function getCurrentSession() {
   return currentSession;
 }
 
+/**
+ * Get the live Set of drone client socket IDs.
+ * Used by mission.routes.js to send waypoint_mission commands.
+ * @returns {Set<string>}
+ */
+function getDroneClients() {
+  return droneClients;
+}
+
+/**
+ * Returns a snapshot of current connection state.
+ * Used by GET /api/debug/connections
+ */
+function getConnectionSnapshot() {
+  return {
+    droneCount:     droneClients.size,
+    webCount:       webClients.size,
+    droneSocketIds: [...droneClients],
+    webSocketIds:   [...webClients],
+    activeSession:  currentSession
+      ? { id: currentSession.id, startTime: currentSession.start_time }
+      : null
+  };
+}
+
 module.exports = {
   initializeSocketIO,
   getIO,
-  getCurrentSession
+  getCurrentSession,
+  getDroneClients,
+  getConnectionSnapshot
 };

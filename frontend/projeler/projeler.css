@@ -9,6 +9,17 @@ body {
     font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
     background-color: #f4f6f9;
     color: #333;
+    min-height: 100vh;
+}
+
+.wrapper {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+.wrapper > main {
+    flex: 1;
 }
 
 /* ========== HEADER (ORTAK) ========== */
@@ -219,7 +230,7 @@ body {
 
 /* ========== FOOTER (ORTAK) ========== */
 .site-footer {
-    margin-top: 4rem;
+    margin-top: auto;
     padding: 1.2rem 0;
     text-align: center;
     background-color: #0f172a;

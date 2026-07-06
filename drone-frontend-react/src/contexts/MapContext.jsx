@@ -6,6 +6,7 @@
 
 import { createContext, useContext, useState, useCallback, useMemo } from 'react';
 import { ApiService } from '@services/api.service';
+import { MissionService } from '@services/mission.service';
 
 const MapContext = createContext(null);
 
@@ -16,6 +17,13 @@ export function MapProvider({ children }) {
   const [selectedAreaId, setSelectedAreaId] = useState(null);
   const [areaMetrics, setAreaMetrics] = useState(new Map()); // dbId -> { scanPercent }
   const [drawOrder, setDrawOrder] = useState([]); // [{ dbId, name, created_at }]
+  // Waypoints from the latest planned mission — shown as a polyline on the map
+  const [scanRoute, setScanRoute] = useState(null); // Array<{lat,lon}> | null
+
+  // Photo overlay state — incremented each time a drone photo lands on the map
+  const [photoCount, setPhotoCount] = useState(0);
+  // Bumping this triggers LeafletMap to remove all photo overlays from the canvas
+  const [clearPhotosFlag, setClearPhotosFlag] = useState(0);
 
   /**
    * Load areas from database
@@ -127,6 +135,17 @@ export function MapProvider({ children }) {
     });
   }, []);
 
+  /** Called by LeafletMap each time a new drone photo overlay is placed */
+  const incrementPhotoCount = useCallback(() => {
+    setPhotoCount((c) => c + 1);
+  }, []);
+
+  /** Remove all photo overlays from the map canvas */
+  const clearPhotoOverlays = useCallback(() => {
+    setClearPhotosFlag((f) => f + 1);
+    setPhotoCount(0);
+  }, []);
+
   /**
    * Get selected area info
    */
@@ -151,7 +170,13 @@ export function MapProvider({ children }) {
       updateAreaMetric,
       drawOrder,
       setDrawOrder,
-      loadAreas
+      loadAreas,
+      scanRoute,
+      setScanRoute,
+      photoCount,
+      incrementPhotoCount,
+      clearPhotoOverlays,
+      clearPhotosFlag
     }),
     [
       map,
@@ -165,7 +190,12 @@ export function MapProvider({ children }) {
       areaMetrics,
       updateAreaMetric,
       drawOrder,
-      loadAreas
+      loadAreas,
+      scanRoute,
+      photoCount,
+      incrementPhotoCount,
+      clearPhotoOverlays,
+      clearPhotosFlag
     ]
   );
 

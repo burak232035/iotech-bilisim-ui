@@ -94,11 +94,41 @@ CREATE TABLE IF NOT EXISTS reports (
 CREATE INDEX IF NOT EXISTS idx_reports_session_id ON reports(session_id);
 CREATE INDEX IF NOT EXISTS idx_reports_generated_at ON reports(generated_at);
 
+-- Table 6: Scan Routes (boustrophedon coverage waypoints)
+CREATE TABLE IF NOT EXISTS scan_routes (
+  id SERIAL PRIMARY KEY,
+  area_id INTEGER REFERENCES areas(id) ON DELETE CASCADE,
+  waypoints JSONB NOT NULL,          -- [[lat, lon], ...]
+  obstacles JSONB DEFAULT '[]',      -- [{lat, lon, radiusM}, ...]
+  scan_width_m NUMERIC(8, 2) DEFAULT 20,
+  altitude_m NUMERIC(8, 2) DEFAULT 50,
+  total_distance_m NUMERIC(10, 2),
+  waypoint_count INTEGER,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_scan_routes_area_id ON scan_routes(area_id);
+CREATE INDEX IF NOT EXISTS idx_scan_routes_created_at ON scan_routes(created_at);
+
+-- Table 7: Obstacles (detected during flights or manually added)
+CREATE TABLE IF NOT EXISTS obstacles (
+  id SERIAL PRIMARY KEY,
+  area_id INTEGER REFERENCES areas(id) ON DELETE CASCADE,
+  lat NUMERIC(12, 8) NOT NULL,
+  lon NUMERIC(12, 8) NOT NULL,
+  radius_m NUMERIC(8, 2) DEFAULT 5,
+  obstacle_type VARCHAR(50) DEFAULT 'unknown',
+  session_id INTEGER REFERENCES flight_sessions(id) ON DELETE SET NULL,
+  detected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_obstacles_area_id ON obstacles(area_id);
+
 -- ================================================
 -- Success Message
 -- ================================================
 DO $$
 BEGIN
   RAISE NOTICE 'Database schema initialized successfully!';
-  RAISE NOTICE 'Tables created: areas, flight_sessions, telemetry_buffer, telemetry_data, reports';
+  RAISE NOTICE 'Tables created: areas, flight_sessions, telemetry_buffer, telemetry_data, reports, scan_routes, obstacles';
 END $$;

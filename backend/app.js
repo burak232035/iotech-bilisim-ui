@@ -1,12 +1,14 @@
 const express = require("express");
 const http = require("http");
 const path = require("path");
-const { initializeSocketIO } = require("./socket.io");
+const { initializeSocketIO, getConnectionSnapshot } = require("./socket.io");
 
-const reportRoutes = require("./routes/report.routes");
-const areaRoutes = require("./routes/area.routes");
-const sessionRoutes = require("./routes/session.routes");
+const reportRoutes   = require("./routes/report.routes");
+const areaRoutes     = require("./routes/area.routes");
+const sessionRoutes  = require("./routes/session.routes");
 const telemetryRoutes = require("./routes/telemetry.routes");
+const scanRoutes     = require("./routes/scan.routes");
+const missionRoutes  = require("./routes/mission.routes");
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -57,11 +59,18 @@ app.get("/", (req, res) => {
   });
 });
 
+// Debug: live connection snapshot (drone bağlı mı?)
+app.get("/api/debug/connections", (req, res) => {
+  res.json(getConnectionSnapshot());
+});
+
 // API Routes
-app.use("/api/reports", reportRoutes);
-app.use("/api/areas", areaRoutes);
-app.use("/api/sessions", sessionRoutes);
+app.use("/api/reports",   reportRoutes);
+app.use("/api/areas",     areaRoutes);
+app.use("/api/sessions",  sessionRoutes);
 app.use("/api/telemetry", telemetryRoutes);
+app.use("/api/scan",      scanRoutes);
+app.use("/api/mission",   missionRoutes);
 
 // Çıktı klasörü (istersen tarayıcıdan da açabilirsin)
 app.use("/reports", express.static(path.join(__dirname, "reports")));

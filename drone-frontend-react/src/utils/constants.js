@@ -4,10 +4,14 @@ export const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3
 
 // API Endpoints
 export const API_ENDPOINTS = {
-  AREAS: '/api/areas',
-  SESSIONS: '/api/sessions',
-  TELEMETRY: '/api/telemetry',
-  REPORTS: '/api/reports/generate'
+  AREAS:          '/api/areas',
+  SESSIONS:       '/api/sessions',
+  TELEMETRY:      '/api/telemetry',
+  REPORTS:        '/api/reports/generate',
+  MISSION_PLAN:   '/api/mission/plan',
+  MISSION_START:  '/api/mission/start',
+  MISSION_STOP:   '/api/mission/stop',
+  MISSION_STATUS: '/api/mission/status'
 };
 
 // Map Configuration
@@ -49,16 +53,34 @@ export const DEMO_CREDENTIALS = {
 
 // Socket.IO Events
 export const SOCKET_EVENTS = {
-  CONNECT: 'connect',
-  DISCONNECT: 'disconnect',
-  REGISTER: 'register',
-  DRONE_TELEMETRY: 'drone_telemetry',
-  DATA_REQUEST: 'data_request',
-  DATA_RESPONSE: 'data_response',
-  DRONE_COMMAND: 'drone_command',
-  SESSION_INFO: 'session_info',
-  SESSION_STARTED: 'session_started',
-  SESSION_ENDED: 'session_ended'
+  CONNECT:          'connect',
+  DISCONNECT:       'disconnect',
+  REGISTER:         'register',
+  DRONE_TELEMETRY:  'drone_telemetry',
+  DATA_REQUEST:     'data_request',
+  DATA_RESPONSE:    'data_response',
+  DRONE_COMMAND:    'drone_command',
+  COMMAND_RESPONSE: 'command_response',
+  SESSION_INFO:     'session_info',
+  SESSION_STARTED:  'session_started',
+  SESSION_ENDED:    'session_ended',
+  MISSION_PROGRESS: 'mission_progress',
+  MISSION_COMPLETE: 'mission_complete',
+  MISSION_STOPPED:  'mission_stopped',
+  DRONE_PHOTO:      'drone_photo'
+};
+
+// Drone komut sabitleri (drone_command event'indeki "command" alanı)
+export const DRONE_COMMANDS = {
+  TAKEOFF:         'takeoff',
+  LAND:            'land',
+  HOVER:           'hover',
+  RETURN_HOME:     'returnHome',
+  EMERGENCY_LAND:  'emergency_land',
+  VIRTUAL_STICK:   'virtual_stick',
+  GIMBAL_PITCH:    'gimbal_pitch',
+  WAYPOINT_MISSION: 'waypoint_mission',
+  STOP_MISSION:    'stop_mission'
 };
 
 // Local Storage Keys

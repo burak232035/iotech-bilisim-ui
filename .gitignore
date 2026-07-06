@@ -25,3 +25,12 @@ npm-debug.log*
 
 # Cache
 .cache/
+
+# Documents & datasets (PDF, docx, pptx, image datasets) - not part of the codebase
+belgeler/
+
+# Generated PDF reports (runtime output)
+backend/reports/generated/*.pdf
+
+# Stray Windows artifact
+nul

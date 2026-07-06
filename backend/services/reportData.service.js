@@ -122,7 +122,8 @@ class ReportDataService {
       maxAltitude: finalStats?.max_altitude
         ? `${Number(finalStats.max_altitude).toFixed(1)} m`
         : "N/A",
-      ucusSuresiDetay: durationFormatted
+      ucusSuresiDetay: durationFormatted,
+      gimbalBilgisi: "Pitch: 0° / Roll: 0° / Yaw: 0°"
     };
   }
 }
