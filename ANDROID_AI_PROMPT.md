@@ -121,6 +121,8 @@ private fun setupSocketListeners() {
 
 Android uygulama her 100ms'de bir aşağıdaki veriyi backend'e gönderir. Backend bu veriyi DB'ye kaydeder ve web dashboard'a iletir.
 
+> **⚠️ Güncelleme talebi — `lat`/`lon` eksik:** Şu anki telemetri payload'ında drone'un GPS konumu (enlem/boylam) yok. Backend/web tarafı, waypoint görevini planlarken rotayı drone'un **gerçek konumuna göre** yönlendirmek için (bkz. §4 waypoint bölümü) bu konuma ihtiyaç duyuyor — bu bilgi olmadan sistem "home" konumunu ancak `drone_photo` event'i geldiğinde öğrenebiliyor (ki o da henüz uygulanmadı). Lütfen `getGpsCoordinates()` gibi bir fonksiyonla `FlightControllerKey.KeyAircraftLocation3D` (veya eşdeğeri) okuyup payload'a `"lat"` ve `"lon"` (WGS-84 derece, `Double`) alanlarını ekleyin.
+
 ### Event Adı: `drone_telemetry`
 
 ```kotlin
@@ -148,6 +150,7 @@ private fun sendTelemetry() {
     val gimbal   = getGimbalAngles()    // {pitch, roll, yaw}
     val altitude = getAltitude()        // {agl, amsl}
     val gps      = getGpsStatus()       // {signalLevel, satelliteCount}
+    val position = getGpsCoordinates()  // {lat, lon} — YENİ, bkz. uyarı yukarıda
 
     val payload = JSONObject().apply {
         put("battery", battery)
@@ -164,6 +167,8 @@ private fun sendTelemetry() {
             put("signalLevel",    gps.signalLevel)    // "WEAK", "MEDIUM", "STRONG"
             put("satelliteCount", gps.satelliteCount) // 0-20+
         })
+        put("lat", position.lat)   // YENİ — WGS-84 derece
+        put("lon", position.lon)   // YENİ — WGS-84 derece
         put("timestamp", System.currentTimeMillis())
     }
 
@@ -206,6 +211,13 @@ private fun getGpsStatus(): GpsData {
     val satCount = KeyManager.getInstance()
         .getValue(KeyTools.createKey(FlightControllerKey.KeyGPSSatelliteCount)) ?: 0
     return GpsData(signalLevel, satCount)
+}
+
+// Konum (YENİ — telemetriye eklenmesi istenen alan)
+private fun getGpsCoordinates(): PositionData {
+    val loc = KeyManager.getInstance()
+        .getValue(KeyTools.createKey(FlightControllerKey.KeyAircraftLocation3D))
+    return PositionData(loc?.latitude ?: 0.0, loc?.longitude ?: 0.0)
 }
 ```
 

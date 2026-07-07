@@ -3,7 +3,7 @@ const pool = require("../config/database");
 const WaypointPlannerService = require("../services/waypointPlanner.service");
 const ScanRouteModel = require("../models/scanRoute.model");
 const ObstacleModel  = require("../models/obstacle.model");
-const { getIO, getDroneClients } = require("../socket.io");
+const { getIO, getDroneClients, getLastKnownPosition } = require("../socket.io");
 
 const router = express.Router();
 
@@ -11,7 +11,12 @@ const router = express.Router();
  * POST /api/mission/plan
  * Compute boustrophedon scan waypoints for an area and optionally persist the route.
  *
- * Body: { areaId, altitudeM?, overlapPercent?, speedMs?, saveRoute? }
+ * Body: { areaId, altitudeM?, overlapPercent?, speedMs?, saveRoute?, homeLat?, homeLon? }
+ *
+ * homeLat/homeLon (optional): drone's current/takeoff position. If omitted, falls back
+ * to the last known position reported by the drone (telemetry or drone_photo). Used to
+ * orient the route so it starts at whichever end is closest to the drone — it can't be
+ * guaranteed the drone is sitting exactly on waypoint 0.
  */
 router.post("/plan", async (req, res) => {
   try {
@@ -20,7 +25,9 @@ router.post("/plan", async (req, res) => {
       altitudeM      = 50,
       overlapPercent = 70,
       speedMs        = 8,
-      saveRoute      = true
+      saveRoute      = true,
+      homeLat        = null,
+      homeLon        = null
     } = req.body;
 
     if (!areaId) {
@@ -37,6 +44,11 @@ router.post("/plan", async (req, res) => {
     // Load persisted obstacles for this area
     const obstacles = await ObstacleModel.getByAreaId(areaId);
 
+    // Resolve home position: explicit body value wins, else last known drone fix
+    const lastPos = getLastKnownPosition();
+    const resolvedHomeLat = homeLat != null ? Number(homeLat) : (lastPos ? lastPos.lat : null);
+    const resolvedHomeLon = homeLon != null ? Number(homeLon) : (lastPos ? lastPos.lon : null);
+
     // Run planner
     const result = WaypointPlannerService.generateScanRoute(
       polygonPoints,
@@ -44,7 +56,9 @@ router.post("/plan", async (req, res) => {
       {
         altitudeM:      Number(altitudeM),
         overlapPercent: Number(overlapPercent),
-        speedMs:        Number(speedMs)
+        speedMs:        Number(speedMs),
+        homeLat:        resolvedHomeLat,
+        homeLon:        resolvedHomeLon
       }
     );
 
@@ -66,8 +80,15 @@ router.post("/plan", async (req, res) => {
     console.log(
       `✅ Mission planned: alan=${areaId} "${area.name}", ` +
       `${result.waypointCount} WP, ${result.totalDistanceM} m, ` +
-      `${result.sweepAngleDeg}° sweep, ${result.stripSpacingM} m şerit`
+      `${result.sweepAngleDeg}° sweep, ${result.stripSpacingM} m şerit` +
+      (result.homeDistanceM != null ? `, home→WP0 ${result.homeDistanceM} m` : ", home konumu bilinmiyor")
     );
+    if (result.homeDistanceM != null && result.homeDistanceM > 450) {
+      console.warn(
+        `⚠️  İlk waypoint home'dan ${result.homeDistanceM} m uzakta — Android'in 500m güvenlik ` +
+        `limitine yakın/üstünde, görev reddedilebilir.`
+      );
+    }
 
     res.json({ ...result, areaId, areaName: area.name, savedRouteId });
 

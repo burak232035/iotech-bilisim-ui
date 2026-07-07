@@ -12,6 +12,7 @@ import { useState, useEffect } from 'react';
 import { Card } from '@components/common/Card';
 import { useMap } from '@contexts/MapContext';
 import { useSocket } from '@contexts/SocketContext';
+import { useTelemetry } from '@contexts/TelemetryContext';
 import { MissionService } from '@services/mission.service';
 import { SOCKET_EVENTS } from '@utils/constants';
 
@@ -176,6 +177,7 @@ function StatusBanner({ status }) {
 export function MissionPlanner() {
   const { selectedAreaId, drawOrder, setScanRoute } = useMap();
   const { socket, isConnected, droneStatus } = useSocket();
+  const { dronePosition } = useTelemetry();
 
   const [areaId,         setAreaId]         = useState('');
   const [altitudeM,      setAltitudeM]      = useState(DEFAULT_ALTITUDE);
@@ -215,14 +217,23 @@ export function MissionPlanner() {
       setMissionStatus('stopped');
       setStatus({ type: 'warning', msg: '⚠️ Görev durduruldu.' });
     };
+    // Android, waypoint_mission'ı kabul etmezse (örn. 500m güvenlik kilidi)
+    // bunu command_response ile bildirir — mission_progress hiç gelmez.
+    const onCommandResponse = (data) => {
+      if (data?.command !== 'waypoint_mission' || data?.status !== 'failed') return;
+      setMissionStatus(null);
+      setStatus({ type: 'error', msg: `❌ Görev reddedildi: ${data.error || 'bilinmeyen hata'}` });
+    };
 
     socket.on(SOCKET_EVENTS.MISSION_PROGRESS, onProgress);
     socket.on(SOCKET_EVENTS.MISSION_COMPLETE, onComplete);
     socket.on(SOCKET_EVENTS.MISSION_STOPPED,  onStopped);
+    socket.on(SOCKET_EVENTS.COMMAND_RESPONSE, onCommandResponse);
     return () => {
       socket.off(SOCKET_EVENTS.MISSION_PROGRESS, onProgress);
       socket.off(SOCKET_EVENTS.MISSION_COMPLETE, onComplete);
       socket.off(SOCKET_EVENTS.MISSION_STOPPED,  onStopped);
+      socket.off(SOCKET_EVENTS.COMMAND_RESPONSE, onCommandResponse);
     };
   }, [socket]);
 
@@ -243,16 +254,32 @@ export function MissionPlanner() {
 
     try {
       const result = await MissionService.planMission(effectiveAreaId, {
-        altitudeM: clampedAlt, overlapPercent: Number(overlapPercent), speedMs: Number(speedMs)
+        altitudeM: clampedAlt, overlapPercent: Number(overlapPercent), speedMs: Number(speedMs),
+        homeLat: dronePosition?.lat ?? undefined,
+        homeLon: dronePosition?.lon ?? undefined
       });
       setPlannedMission({ ...result, altitudePlanned: clampedAlt });
       setScanRoute(result.waypoints);
       const distKm = (result.totalDistanceM / 1000).toFixed(2);
       const etaMin = Math.round(result.totalDistanceM / Number(speedMs) / 60);
-      setStatus({
-        type: 'success',
-        msg: `✅ Rota hazır — ${result.waypointCount} waypoint · ${distKm} km · ~${etaMin} dk · şerit ${result.stripSpacingM} m`
-      });
+
+      if (result.homeDistanceM == null) {
+        setStatus({
+          type: 'success',
+          msg: `✅ Rota hazır — ${result.waypointCount} waypoint · ${distKm} km · ~${etaMin} dk · şerit ${result.stripSpacingM} m. ` +
+               `⚠️ Drone konumu henüz bilinmiyor — ilk waypoint mesafesi kontrol edilemedi (500 m güvenlik limiti var, dikkatli olun).`
+        });
+      } else if (result.homeDistanceM > 450) {
+        setStatus({
+          type: 'error',
+          msg: `⚠️ İlk waypoint drone'dan ${result.homeDistanceM} m uzakta — Android'in 500 m güvenlik limitine yakın/üstünde, görev muhtemelen reddedilecek. Alanı drone'a yaklaştırın.`
+        });
+      } else {
+        setStatus({
+          type: 'success',
+          msg: `✅ Rota hazır — ${result.waypointCount} waypoint · ${distKm} km · ~${etaMin} dk · şerit ${result.stripSpacingM} m · ilk waypoint'e ${result.homeDistanceM} m`
+        });
+      }
     } catch (err) {
       setStatus({ type: 'error', msg: `Hata: ${err.message}` });
     } finally {
@@ -505,6 +532,11 @@ export function MissionPlanner() {
                   { val: `${(plannedMission.totalDistanceM/1000).toFixed(2)} km`, lbl: 'Toplam Mesafe', cls: 'text-primary' },
                   { val: `${Math.round(plannedMission.totalDistanceM / Number(speedMs) / 60)} dk`, lbl: 'Tahmini Süre', cls: 'text-primary' },
                   { val: `${plannedMission.stripSpacingM} m`, lbl: 'Şerit Aralığı', cls: 'text-primary' },
+                  {
+                    val: plannedMission.homeDistanceM != null ? `${plannedMission.homeDistanceM} m` : '—',
+                    lbl: "İlk WP'ye Mesafe",
+                    cls: plannedMission.homeDistanceM > 450 ? 'text-danger' : 'text-primary'
+                  },
                   { val: `${plannedMission.footprintWidthM} m`, lbl: 'Kamera Genişliği', cls: 'text-secondary' },
                   { val: `${plannedMission.sweepAngleDeg}°`, lbl: 'Tarama Açısı', cls: 'text-secondary' },
                   { val: `${plannedMission.altitudePlanned ?? altitudeM} m`, lbl: 'Planlama İrtifası', cls: 'text-secondary' },

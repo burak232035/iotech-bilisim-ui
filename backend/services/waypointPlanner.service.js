@@ -27,21 +27,27 @@ class WaypointPlannerService {
    *
    * @param {Array<[number,number]>} polygonPoints  [[lat,lon], …]  min 3 pts
    * @param {Array<{lat,lon,radius_m}>} obstacles   (may be empty)
-   * @param {{ altitudeM, overlapPercent, speedMs }} options
+   * @param {{ altitudeM, overlapPercent, speedMs, homeLat, homeLon }} options
+   *        homeLat/homeLon (optional): drone's current/takeoff position. When given,
+   *        the route is oriented (forward or reversed) so it starts at whichever end
+   *        is closer to home — the drone is never assumed to already be at waypoint 0.
    * @returns {{
    *   waypoints:       Array<{lat,lon,altitude,speed,actions}>,
    *   totalDistanceM:  number,
    *   waypointCount:   number,
    *   stripSpacingM:   number,
    *   footprintWidthM: number,
-   *   sweepAngleDeg:   number
+   *   sweepAngleDeg:   number,
+   *   homeDistanceM:   number|null   // distance from home to the (possibly reordered) first waypoint
    * }}
    */
   static generateScanRoute(polygonPoints, obstacles = [], options = {}) {
     const {
       altitudeM      = 50,
       overlapPercent = 70,
-      speedMs        = 8
+      speedMs        = 8,
+      homeLat        = null,
+      homeLon        = null
     } = options;
 
     if (!Array.isArray(polygonPoints) || polygonPoints.length < 3) {
@@ -154,13 +160,32 @@ class WaypointPlannerService {
       dir *= -1;
     }
 
+    // Orient the path toward home: the drone can't be guaranteed to sit exactly on
+    // waypoint 0, so start from whichever end of the (reversible) boustrophedon path
+    // is actually closer to its current/takeoff position.
+    let homeDistanceM = null;
+    if (Number.isFinite(homeLat) && Number.isFinite(homeLon) && waypoints.length > 0) {
+      const distToFirst = this._haversine(homeLat, homeLon, waypoints[0].lat, waypoints[0].lon);
+      const distToLast  = this._haversine(
+        homeLat, homeLon,
+        waypoints[waypoints.length - 1].lat, waypoints[waypoints.length - 1].lon
+      );
+      if (distToLast < distToFirst) {
+        waypoints.reverse();
+        homeDistanceM = distToLast;
+      } else {
+        homeDistanceM = distToFirst;
+      }
+    }
+
     return {
       waypoints,
       totalDistanceM:  Math.round(totalDistM),
       waypointCount:   waypoints.length,
       stripSpacingM:   Math.round(stripSpacingM * 10) / 10,
       footprintWidthM: Math.round(footprintWidthM * 10) / 10,
-      sweepAngleDeg:   Math.round(sweepAngleDeg * 10) / 10
+      sweepAngleDeg:   Math.round(sweepAngleDeg * 10) / 10,
+      homeDistanceM:   homeDistanceM !== null ? Math.round(homeDistanceM) : null
     };
   }
 
@@ -288,6 +313,16 @@ class WaypointPlannerService {
 
   static _dist(a, b) {
     return Math.hypot(b.x - a.x, b.y - a.y);
+  }
+
+  /** Great-circle distance in metres between two lat/lon points (haversine). */
+  static _haversine(lat1, lon1, lat2, lon2) {
+    const toRad = (d) => d * Math.PI / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    return 2 * EARTH_R * Math.asin(Math.sqrt(a));
   }
 }
 

@@ -22,6 +22,9 @@ export function TelemetryProvider({ children }) {
   });
 
   const [lastUpdate, setLastUpdate] = useState(null);
+  // Last known drone GPS fix — from telemetry once it carries lat/lon, or from
+  // drone_photo today. Used as the mission planner's "home" reference point.
+  const [dronePosition, setDronePosition] = useState(null); // { lat, lon } | null
 
   useEffect(() => {
     if (!socket) return;
@@ -37,16 +40,28 @@ export function TelemetryProvider({ children }) {
         scanPercent: data.scanPercent ?? prev.scanPercent
       }));
 
+      if (typeof data.lat === 'number' && typeof data.lon === 'number') {
+        setDronePosition({ lat: data.lat, lon: data.lon });
+      }
+
       setLastUpdate(new Date());
+    };
+
+    const handlePhoto = (data) => {
+      if (typeof data?.lat === 'number' && typeof data?.lon === 'number') {
+        setDronePosition({ lat: data.lat, lon: data.lon });
+      }
     };
 
     // Listen to both telemetry events
     socket.on(SOCKET_EVENTS.DRONE_TELEMETRY, handleTelemetry);
     socket.on(SOCKET_EVENTS.DATA_RESPONSE, handleTelemetry);
+    socket.on(SOCKET_EVENTS.DRONE_PHOTO, handlePhoto);
 
     return () => {
       socket.off(SOCKET_EVENTS.DRONE_TELEMETRY, handleTelemetry);
       socket.off(SOCKET_EVENTS.DATA_RESPONSE, handleTelemetry);
+      socket.off(SOCKET_EVENTS.DRONE_PHOTO, handlePhoto);
     };
   }, [socket]);
 
@@ -54,9 +69,10 @@ export function TelemetryProvider({ children }) {
     () => ({
       telemetry,
       lastUpdate,
-      isConnected
+      isConnected,
+      dronePosition
     }),
-    [telemetry, lastUpdate, isConnected]
+    [telemetry, lastUpdate, isConnected, dronePosition]
   );
 
   return (

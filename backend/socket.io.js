@@ -7,6 +7,16 @@ let currentSession = null;
 const webClients = new Set();
 const droneClients = new Set();
 
+// Last known drone GPS fix (from telemetry once it carries lat/lon, or from drone_photo
+// today). Used as the default "home" position so mission planning can start the route
+// from whichever end is closest to the drone instead of assuming it sits on waypoint 0.
+let lastKnownPosition = null; // { lat, lon, updatedAt }
+
+function updateLastKnownPosition(lat, lon) {
+  if (typeof lat !== "number" || typeof lon !== "number") return;
+  lastKnownPosition = { lat, lon, updatedAt: Date.now() };
+}
+
 /**
  * Initialize Socket.IO server
  * @param {Object} httpServer - HTTP server instance
@@ -102,6 +112,9 @@ function initializeSocketIO(httpServer) {
         return;
       }
 
+      // Track live position if the telemetry payload carries lat/lon
+      updateLastKnownPosition(data?.lat, data?.lon);
+
       // Buffer telemetry (non-blocking)
       TelemetryService.bufferTelemetry(currentSession.id, data);
 
@@ -196,6 +209,7 @@ function initializeSocketIO(httpServer) {
         return;
       }
       console.log(`📷 Photo from drone: ${data.lat.toFixed(5)}, ${data.lon.toFixed(5)} @ ${data.altitude ?? '?'}m`);
+      updateLastKnownPosition(data.lat, data.lon);
       webClients.forEach((clientId) => {
         io.to(clientId).emit("drone_photo", data);
       });
@@ -265,14 +279,23 @@ function getDroneClients() {
  */
 function getConnectionSnapshot() {
   return {
-    droneCount:     droneClients.size,
-    webCount:       webClients.size,
-    droneSocketIds: [...droneClients],
-    webSocketIds:   [...webClients],
-    activeSession:  currentSession
+    droneCount:       droneClients.size,
+    webCount:         webClients.size,
+    droneSocketIds:   [...droneClients],
+    webSocketIds:     [...webClients],
+    activeSession:    currentSession
       ? { id: currentSession.id, startTime: currentSession.start_time }
-      : null
+      : null,
+    lastKnownPosition
   };
+}
+
+/**
+ * Last known drone GPS fix, or null if none received yet.
+ * @returns {{lat:number, lon:number, updatedAt:number}|null}
+ */
+function getLastKnownPosition() {
+  return lastKnownPosition;
 }
 
 module.exports = {
@@ -280,5 +303,6 @@ module.exports = {
   getIO,
   getCurrentSession,
   getDroneClients,
-  getConnectionSnapshot
+  getConnectionSnapshot,
+  getLastKnownPosition
 };
