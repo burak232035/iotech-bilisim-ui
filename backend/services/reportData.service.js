@@ -107,7 +107,7 @@ class ReportDataService {
         ? `${(session.total_distance_meters / 1000).toFixed(2)} km`
         : "N/A",
       ucusSuresi: durationFormatted,
-      genelDegerlendirme: "%0.0", // TODO: Add waste detection integration
+      genelDegerlendirme: "0 tespit", // report.routes.js gerçek waste_detections toplamıyla değiştirir
       toplamFrame: finalStats?.data_points || 0,
       raporStride: "10", // 1 Hz sampling (every 10th record from 10 Hz)
       haritaGorseli: "https://via.placeholder.com/420x260?text=Harita+Gorseli", // TODO: Generate from area coordinates

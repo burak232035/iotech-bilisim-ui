@@ -9,6 +9,9 @@ const sessionRoutes  = require("./routes/session.routes");
 const telemetryRoutes = require("./routes/telemetry.routes");
 const scanRoutes     = require("./routes/scan.routes");
 const missionRoutes  = require("./routes/mission.routes");
+const photoRoutes    = require("./routes/photo.routes");
+const orthomosaicRoutes = require("./routes/orthomosaic.routes");
+const landcoverRoutes = require("./routes/landcover.routes");
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -54,6 +57,24 @@ app.get("/", (req, res) => {
       },
       reports: {
         "POST /api/reports/generate": "Generate PDF report"
+      },
+      photos: {
+        "POST /api/photos/upload": "Upload a full-resolution flight photo",
+        "POST /api/photos/sessions/:id/classify": "Run YOLO waste detection on a session's photos",
+        "GET /api/photos/classify/status/:jobId": "Check classify job status",
+        "GET /api/photos/sessions/:id/detections": "Get waste detections for a session",
+        "GET /api/photos/areas/:id/detections": "Get waste detections for an area"
+      },
+      orthomosaic: {
+        "POST /api/orthomosaic/sessions/:id/generate": "Stitch a session's photos into a seamless aerial composite (OpenDroneMap)",
+        "GET /api/orthomosaic/status/:id": "Check orthomosaic job status",
+        "GET /api/orthomosaic/sessions/:id": "Get latest orthomosaic for a session",
+        "GET /api/orthomosaic/areas/:id": "Get completed orthomosaics for an area"
+      },
+      landcover: {
+        "POST /api/landcover/sessions/:id/analyze": "Run YOLO-seg green/concrete segmentation on a session's photos",
+        "GET /api/landcover/status/:jobId": "Check analyze job status",
+        "GET /api/landcover/sessions/:id": "Get average green/concrete percentages for a session"
       }
     }
   });
@@ -71,9 +92,13 @@ app.use("/api/sessions",  sessionRoutes);
 app.use("/api/telemetry", telemetryRoutes);
 app.use("/api/scan",      scanRoutes);
 app.use("/api/mission",   missionRoutes);
+app.use("/api/photos",    photoRoutes);
+app.use("/api/orthomosaic", orthomosaicRoutes);
+app.use("/api/landcover", landcoverRoutes);
 
 // Çıktı klasörü (istersen tarayıcıdan da açabilirsin)
 app.use("/reports", express.static(path.join(__dirname, "reports")));
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 const PORT = 3001;
 httpServer.listen(PORT, () => {

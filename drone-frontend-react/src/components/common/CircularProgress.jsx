@@ -9,7 +9,8 @@ export function CircularProgress({
   size = 120,
   strokeWidth = 10,
   label = '',
-  colorThresholds = { low: 30, medium: 70 }
+  colorThresholds = { low: 30, medium: 70 },
+  color: colorOverride
 }) {
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
@@ -21,7 +22,7 @@ export function CircularProgress({
     return '#16a34a'; // green
   };
 
-  const color = getColor();
+  const color = colorOverride || getColor();
 
   return (
     <svg width={size} height={size}>

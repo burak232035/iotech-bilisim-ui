@@ -76,6 +76,8 @@ export function SocketProvider({ children }) {
       return false;
     }
 
+    console.log('📤 drone_command gönderiliyor:', command, payload);
+
     socket.emit(SOCKET_EVENTS.DRONE_COMMAND, {
       command,
       ...payload,

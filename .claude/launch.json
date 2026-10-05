@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backend",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["backend/app.js"],
+      "port": 3001
+    },
+    {
+      "name": "frontend-react",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "drone-frontend-react", "run", "dev"],
+      "port": 3000
+    }
+  ]
+}

@@ -17,6 +17,17 @@ function updateLastKnownPosition(lat, lon) {
   lastKnownPosition = { lat, lon, updatedAt: Date.now() };
 }
 
+// drone_photo diagnostics — polled via /api/debug/connections so we can verify
+// live whether photos are arriving without needing terminal scrollback access.
+const photoStats = {
+  receivedCount:  0,
+  rejectedCount:  0,
+  lastReceivedAt: null,
+  lastRejectedAt: null,
+  lastRejectReason: null,
+  lastSizeBytes:  null
+};
+
 /**
  * Initialize Socket.IO server
  * @param {Object} httpServer - HTTP server instance
@@ -205,10 +216,25 @@ function initializeSocketIO(httpServer) {
     // imageBase64 should be a compressed JPEG thumbnail (~100 KB max)
     socket.on("drone_photo", (data) => {
       if (!data?.imageBase64 || !data?.lat || !data?.lon) {
-        console.warn("⚠️  drone_photo: eksik alan (imageBase64, lat, lon zorunlu)");
+        const reason = !data?.imageBase64 ? "imageBase64 eksik" : !data?.lat ? "lat eksik" : "lon eksik";
+        console.warn(`⚠️  drone_photo: eksik alan (${reason})`);
+        photoStats.rejectedCount += 1;
+        photoStats.lastRejectedAt = Date.now();
+        photoStats.lastRejectReason = reason;
         return;
       }
-      console.log(`📷 Photo from drone: ${data.lat.toFixed(5)}, ${data.lon.toFixed(5)} @ ${data.altitude ?? '?'}m`);
+      console.log(
+        `📷 Photo from drone: ${data.lat.toFixed(5)}, ${data.lon.toFixed(5)} ` +
+        `@ ${data.altitude ?? '?'}m, heading ${data.heading ?? '?'}°`
+      );
+      photoStats.receivedCount += 1;
+      photoStats.lastReceivedAt = Date.now();
+      photoStats.lastSizeBytes = typeof data.imageBase64 === "string" ? data.imageBase64.length : null;
+      // Kept for debugging without needing terminal scrollback access —
+      // full recent payload metadata queryable via /api/debug/connections.
+      photoStats.lastPhotoMeta = {
+        lat: data.lat, lon: data.lon, altitude: data.altitude ?? null, heading: data.heading ?? null
+      };
       updateLastKnownPosition(data.lat, data.lon);
       webClients.forEach((clientId) => {
         io.to(clientId).emit("drone_photo", data);
@@ -286,7 +312,8 @@ function getConnectionSnapshot() {
     activeSession:    currentSession
       ? { id: currentSession.id, startTime: currentSession.start_time }
       : null,
-    lastKnownPosition
+    lastKnownPosition,
+    photoStats
   };
 }
 

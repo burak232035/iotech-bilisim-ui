@@ -17,7 +17,12 @@ import { MissionService } from '@services/mission.service';
 import { SOCKET_EVENTS } from '@utils/constants';
 
 const DEFAULT_ALTITUDE  = 30;
-const DEFAULT_OVERLAP   = 70;
+const DEFAULT_OVERLAP   = 65; // backend'in fotogrametri-uyumlu varsayılanıyla eşleşiyor
+// Düşük tutulursa (örn. 20-30) canlı harita önizlemesinde daha az kare üst üste
+// biner, görüntü daha temiz görünür. Yüksek tutulursa (75) ODM ortomozaik için
+// gereken örtüşme sağlanır ama çok sayıda üst üste binen kare canlı önizlemede
+// dağınık görünür. İkisi aynı anda optimize edilemiyor — uçuşun amacına göre seçin.
+const DEFAULT_FRONT_OVERLAP = 20;
 const DEFAULT_SPEED     = 8;
 const MAX_ALTITUDE      = 50;
 
@@ -182,6 +187,7 @@ export function MissionPlanner() {
   const [areaId,         setAreaId]         = useState('');
   const [altitudeM,      setAltitudeM]      = useState(DEFAULT_ALTITUDE);
   const [overlapPercent, setOverlapPercent] = useState(DEFAULT_OVERLAP);
+  const [frontOverlapPercent, setFrontOverlapPercent] = useState(DEFAULT_FRONT_OVERLAP);
   const [speedMs,        setSpeedMs]        = useState(DEFAULT_SPEED);
   const [plannedMission, setPlannedMission] = useState(null);
   const [loading,        setLoading]        = useState(false);
@@ -254,7 +260,8 @@ export function MissionPlanner() {
 
     try {
       const result = await MissionService.planMission(effectiveAreaId, {
-        altitudeM: clampedAlt, overlapPercent: Number(overlapPercent), speedMs: Number(speedMs),
+        altitudeM: clampedAlt, overlapPercent: Number(overlapPercent),
+        frontOverlapPercent: Number(frontOverlapPercent), speedMs: Number(speedMs),
         homeLat: dronePosition?.lat ?? undefined,
         homeLon: dronePosition?.lon ?? undefined
       });
@@ -439,11 +446,26 @@ export function MissionPlanner() {
                 </label>
                 <input
                   type="number" className="form-control"
-                  value={overlapPercent} min={40} max={90} step={5}
+                  value={overlapPercent} min={0} max={90} step={5}
                   onChange={e => setOverlapPercent(e.target.value)}
                   disabled={loading}
                 />
                 <small className="text-muted">Yan örtüşme</small>
+              </div>
+
+              <div className="col-md-2 col-6">
+                <label className="form-label fw-bold">
+                  <i className="fas fa-layer-group me-1 text-warning"></i>İleri Örtüşme (%)
+                </label>
+                <input
+                  type="number" className="form-control"
+                  value={frontOverlapPercent} min={0} max={90} step={5}
+                  onChange={e => setFrontOverlapPercent(e.target.value)}
+                  disabled={loading}
+                />
+                <small className="text-muted">
+                  Düşük (~20): temiz canlı önizleme. Yüksek (~75): ODM ortomozaik için gerekli, ama kareler üst üste biner.
+                </small>
               </div>
 
               <div className="col-md-2 col-6">

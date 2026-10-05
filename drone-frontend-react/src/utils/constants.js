@@ -11,7 +11,15 @@ export const API_ENDPOINTS = {
   MISSION_PLAN:   '/api/mission/plan',
   MISSION_START:  '/api/mission/start',
   MISSION_STOP:   '/api/mission/stop',
-  MISSION_STATUS: '/api/mission/status'
+  MISSION_STATUS: '/api/mission/status',
+  PHOTOS_UPLOAD:     '/api/photos/upload',
+  PHOTOS_CLASSIFY:   (sessionId) => `/api/photos/sessions/${sessionId}/classify`,
+  CLASSIFY_STATUS:   (jobId) => `/api/photos/classify/status/${jobId}`,
+  SESSION_DETECTIONS: (sessionId) => `/api/photos/sessions/${sessionId}/detections`,
+  AREA_DETECTIONS:    (areaId) => `/api/photos/areas/${areaId}/detections`,
+  LANDCOVER_ANALYZE: (sessionId) => `/api/landcover/sessions/${sessionId}/analyze`,
+  LANDCOVER_STATUS:  (jobId) => `/api/landcover/status/${jobId}`,
+  LANDCOVER_RESULT:  (sessionId) => `/api/landcover/sessions/${sessionId}`
 };
 
 // Map Configuration
@@ -33,6 +41,22 @@ export const AREA_COLORS = [
   '#ea580c', // orange
   '#64748b'  // slate
 ];
+
+// Waste category colors (map markers + report)
+export const WASTE_CATEGORY_COLORS = {
+  'kağıt':   '#a16207', // brown
+  'cam':     '#0ea5e9', // sky
+  'plastik': '#eab308', // yellow
+  'metal':   '#64748b', // slate
+  'geri dönüştürülemez': '#71717a', // gray
+  'organik': '#65a30d'  // olive green
+};
+
+// Land-cover colors (green/concrete ratio card)
+export const LANDCOVER_COLORS = {
+  green:    '#16a34a',
+  concrete: '#78716c'
+};
 
 // Telemetry Thresholds
 export const BATTERY_THRESHOLDS = {

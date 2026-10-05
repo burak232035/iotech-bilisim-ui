@@ -124,11 +124,73 @@ CREATE TABLE IF NOT EXISTS obstacles (
 
 CREATE INDEX IF NOT EXISTS idx_obstacles_area_id ON obstacles(area_id);
 
+-- Table 8: Photos (full-resolution originals uploaded after landing)
+CREATE TABLE IF NOT EXISTS photos (
+  id SERIAL PRIMARY KEY,
+  session_id INTEGER REFERENCES flight_sessions(id) ON DELETE CASCADE,
+  area_id INTEGER REFERENCES areas(id) ON DELETE SET NULL,
+  file_path VARCHAR(500) NOT NULL,
+  lat NUMERIC(12, 8) NOT NULL,
+  lon NUMERIC(12, 8) NOT NULL,
+  altitude_agl NUMERIC(8, 2),
+  heading NUMERIC(6, 2),
+  captured_at TIMESTAMP,
+  uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  classified_at TIMESTAMP  -- NULL until YOLO has processed this photo
+);
+
+CREATE INDEX IF NOT EXISTS idx_photos_session_id ON photos(session_id);
+CREATE INDEX IF NOT EXISTS idx_photos_area_id ON photos(area_id);
+CREATE INDEX IF NOT EXISTS idx_photos_classified_at ON photos(classified_at);
+
+-- Table 9: Waste Detections (one row per YOLO-detected object)
+CREATE TABLE IF NOT EXISTS waste_detections (
+  id SERIAL PRIMARY KEY,
+  photo_id INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+  category VARCHAR(30) NOT NULL,  -- 'kağıt' | 'cam' | 'plastik' | 'metal' | 'geri dönüştürülemez' | 'organik'
+  confidence NUMERIC(5, 4) NOT NULL,
+  bbox JSONB NOT NULL,            -- {x1,y1,x2,y2} normalized 0-1, in-photo coords
+  lat NUMERIC(12, 8) NOT NULL,    -- real-world position of the detected object
+  lon NUMERIC(12, 8) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_waste_detections_photo_id ON waste_detections(photo_id);
+CREATE INDEX IF NOT EXISTS idx_waste_detections_category ON waste_detections(category);
+
+-- Table 10: Orthomosaics (stitched aerial composite from a flight's full-res photos)
+CREATE TABLE IF NOT EXISTS orthomosaics (
+  id SERIAL PRIMARY KEY,
+  session_id INTEGER REFERENCES flight_sessions(id) ON DELETE CASCADE,
+  area_id INTEGER REFERENCES areas(id) ON DELETE SET NULL,
+  file_path VARCHAR(500),         -- PNG on disk, NULL until status='done'
+  bounds JSONB,                   -- {swLat,swLon,neLat,neLon} WGS84, NULL until done
+  photo_count INTEGER,
+  status VARCHAR(20) DEFAULT 'processing', -- 'processing' | 'done' | 'error'
+  error TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_orthomosaics_session_id ON orthomosaics(session_id);
+CREATE INDEX IF NOT EXISTS idx_orthomosaics_area_id ON orthomosaics(area_id);
+
+-- Table 11: Landcover Analyses (one row per photo, YOLO-seg green/concrete percentages)
+CREATE TABLE IF NOT EXISTS landcover_analyses (
+  id SERIAL PRIMARY KEY,
+  photo_id INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+  green_pct NUMERIC(5, 2) NOT NULL,     -- % of photo pixels classified as vegetation
+  concrete_pct NUMERIC(5, 2) NOT NULL,  -- % of photo pixels classified as concrete/paved
+  other_pct NUMERIC(5, 2) NOT NULL,     -- remainder (neither green nor concrete)
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_landcover_analyses_photo_id ON landcover_analyses(photo_id);
+
 -- ================================================
 -- Success Message
 -- ================================================
 DO $$
 BEGIN
   RAISE NOTICE 'Database schema initialized successfully!';
-  RAISE NOTICE 'Tables created: areas, flight_sessions, telemetry_buffer, telemetry_data, reports, scan_routes, obstacles';
+  RAISE NOTICE 'Tables created: areas, flight_sessions, telemetry_buffer, telemetry_data, reports, scan_routes, obstacles, photos, waste_detections, orthomosaics, landcover_analyses';
 END $$;

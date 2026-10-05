@@ -6,10 +6,11 @@
 import { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet-draw';
+import 'leaflet-imageoverlay-rotated';
 import { useMap } from '@contexts/MapContext';
 import { useSocket } from '@contexts/SocketContext';
 import { ApiService } from '@services/api.service';
-import { MAP_CONFIG, AREA_COLORS } from '@utils/constants';
+import { MAP_CONFIG, AREA_COLORS, WASTE_CATEGORY_COLORS } from '@utils/constants';
 import {
   geojsonFeatureToDbPolygon,
   dbPolygonToGeojsonFeature
@@ -31,22 +32,40 @@ L.Icon.Default.mergeOptions({
 const HFOV_DEG = 82.1;
 const PHOTO_ASPECT = 4 / 3; // width / height
 
+const METERS_PER_DEG_LAT = 111319.9;
+
 /**
- * Given drone GPS + altitude, return Leaflet LatLngBounds for the photo footprint.
- * Heading is currently not used (map-north aligned) — rotation requires a Leaflet plugin.
+ * Given a nadir photo's GPS position, altitude and compass heading, return
+ * the three corners (topLeft, topRight, bottomLeft) L.imageOverlay.rotated
+ * needs to place the image with the correct real-world rotation.
+ *
+ * "Top" of the image = the far edge in the direction of travel (heading);
+ * this matches how the drone captures it (nose-forward = image-up) and how
+ * the backend's geoProjection.service.js interprets waypoint photos.
+ * heading: compass bearing in degrees, 0=N, 90=E, clockwise.
  */
-function calcPhotoBounds(lat, lon, altitudeM) {
+function calcRotatedPhotoCorners(lat, lon, altitudeM, headingDeg) {
   const alt = Math.max(altitudeM || 30, 5);
   const halfWidthM  = alt * Math.tan((HFOV_DEG / 2) * Math.PI / 180);
   const halfHeightM = halfWidthM / PHOTO_ASPECT;
 
-  const deltaLat = halfHeightM / 111319.9;
-  const deltaLon = halfWidthM  / (111319.9 * Math.cos(lat * Math.PI / 180));
+  const h = ((headingDeg || 0) * Math.PI) / 180;
+  // Forward (heading direction) and right (90° clockwise from heading) unit vectors, as [East, North]
+  const fwd   = [Math.sin(h), Math.cos(h)];
+  const right = [Math.cos(h), -Math.sin(h)];
 
-  return [
-    [lat - deltaLat, lon - deltaLon], // SW
-    [lat + deltaLat, lon + deltaLon]  // NE
+  const toLatLon = ([east, north]) => [
+    lat + north / METERS_PER_DEG_LAT,
+    lon + east / (METERS_PER_DEG_LAT * Math.cos(lat * Math.PI / 180))
   ];
+
+  const add = (a, b, s) => [a[0] + b[0] * s, a[1] + b[1] * s];
+
+  const topLeft    = toLatLon(add(add([0, 0], fwd, halfHeightM), right, -halfWidthM));
+  const topRight   = toLatLon(add(add([0, 0], fwd, halfHeightM), right,  halfWidthM));
+  const bottomLeft = toLatLon(add(add([0, 0], fwd, -halfHeightM), right, -halfWidthM));
+
+  return { topLeft, topRight, bottomLeft };
 }
 
 export function LeafletMap() {
@@ -54,8 +73,11 @@ export function LeafletMap() {
   const mapInstanceRef = useRef(null);
   const drawnItemsRef  = useRef(null);
   const scanLayerRef   = useRef(null);
+  const wasteLayerRef  = useRef(null);
+  const orthomosaicLayerRef = useRef(null);
   const photoLayersRef = useRef([]);   // array of L.imageOverlay instances
   const droneMarkerRef = useRef(null); // live drone position marker
+  const hasCenteredOnDroneRef = useRef(false); // pan to drone only on its first live fix
 
   const {
     setMap,
@@ -66,7 +88,9 @@ export function LeafletMap() {
     addArea,
     scanRoute,
     incrementPhotoCount,
-    clearPhotosFlag
+    clearPhotosFlag,
+    wasteDetections,
+    orthomosaicLayer
   } = useMap();
 
   const { socket } = useSocket();
@@ -143,8 +167,16 @@ export function LeafletMap() {
         const feature  = layer.toGeoJSON();
         const dbPolygon = geojsonFeatureToDbPolygon(feature);
         const savedArea = await ApiService.createArea(name, dbPolygon);
-        await loadAreas();
+        const sortedAreas = await loadAreas();
         drawnItemsLayer.removeLayer(layer);
+
+        // Render the newly saved area immediately — without this, it only appeared
+        // after a full page reload (loadAreas() alone just updates the dropdown list,
+        // it doesn't draw anything), and deleting it right after creating silently
+        // no-op'd because it was never added to the `areas` map either.
+        const orderIndex = sortedAreas.findIndex(a => String(a.id) === String(savedArea.id));
+        renderAreaOnMap(savedArea, orderIndex >= 0 ? orderIndex : sortedAreas.length - 1);
+
         selectArea(savedArea.id);
         alert('Alan başarıyla kaydedildi ✅');
       } catch (error) {
@@ -254,6 +286,56 @@ export function LeafletMap() {
     mapInst.fitBounds(group.getBounds(), { padding: [30, 30] });
   }, [scanRoute]);
 
+  // ── Waste detection markers (YOLO sonuçları) ─────────────────────────────────
+  useEffect(() => {
+    const mapInst = mapInstanceRef.current;
+    if (!mapInst) return;
+
+    if (wasteLayerRef.current) {
+      mapInst.removeLayer(wasteLayerRef.current);
+      wasteLayerRef.current = null;
+    }
+
+    if (!wasteDetections || wasteDetections.length === 0) return;
+
+    const markers = wasteDetections.map(d => {
+      const color = WASTE_CATEGORY_COLORS[d.category] || WASTE_CATEGORY_COLORS['geri dönüştürülemez'];
+      return L.circleMarker([d.lat, d.lon], {
+        radius: 6, fillColor: color, color: '#fff', weight: 1.5, fillOpacity: 0.9
+      }).bindTooltip(
+        `${d.category} · %${Math.round(d.confidence * 100)}`,
+        { direction: 'top', sticky: true }
+      );
+    });
+
+    const group = L.featureGroup(markers).addTo(mapInst);
+    wasteLayerRef.current = group;
+  }, [wasteDetections]);
+
+  // ── Orthomosaic overlay (ODM-stitched composite) ─────────────────────────────
+  // Already ortho-rectified/north-aligned by ODM — plain (non-rotated) overlay.
+  useEffect(() => {
+    const mapInst = mapInstanceRef.current;
+    if (!mapInst) return;
+
+    if (orthomosaicLayerRef.current) {
+      mapInst.removeLayer(orthomosaicLayerRef.current);
+      orthomosaicLayerRef.current = null;
+    }
+
+    if (!orthomosaicLayer?.url || !orthomosaicLayer?.bounds) return;
+
+    const { swLat, swLon, neLat, neLon } = orthomosaicLayer.bounds;
+    const overlay = L.imageOverlay(
+      orthomosaicLayer.url,
+      [[swLat, swLon], [neLat, neLon]],
+      { opacity: 0.95, interactive: false }
+    ).addTo(mapInst);
+
+    orthomosaicLayerRef.current = overlay;
+    mapInst.fitBounds(overlay.getBounds(), { padding: [30, 30] });
+  }, [orthomosaicLayer]);
+
   // ── Drone photo overlay (Socket.IO) ─────────────────────────────────────────
   useEffect(() => {
     if (!socket) return;
@@ -263,12 +345,14 @@ export function LeafletMap() {
       if (!mapInst) return;
       if (!data?.imageBase64 || !data?.lat || !data?.lon) return;
 
-      const bounds  = calcPhotoBounds(data.lat, data.lon, data.altitude);
-      const overlay = L.imageOverlay(data.imageBase64, bounds, {
-        opacity:     0.88,
-        interactive: true,
-        crossOrigin: false
-      });
+      const { topLeft, topRight, bottomLeft } = calcRotatedPhotoCorners(
+        data.lat, data.lon, data.altitude, data.heading
+      );
+      const overlay = L.imageOverlay.rotated(
+        data.imageBase64,
+        L.latLng(topLeft), L.latLng(topRight), L.latLng(bottomLeft),
+        { opacity: 0.88, interactive: true, crossOrigin: false }
+      );
 
       const ts = data.timestamp
         ? new Date(data.timestamp).toLocaleTimeString('tr-TR')
@@ -277,7 +361,7 @@ export function LeafletMap() {
       overlay.bindTooltip(
         `<b>📷 Drone Fotoğrafı</b><br>` +
         `${data.lat.toFixed(6)}, ${data.lon.toFixed(6)}<br>` +
-        `İrtifa: ${data.altitude ?? '?'} m &nbsp;|&nbsp; ${ts}`,
+        `İrtifa: ${data.altitude ?? '?'} m · Yön: ${data.heading ?? '?'}° &nbsp;|&nbsp; ${ts}`,
         { direction: 'top', sticky: true }
       );
 
@@ -299,17 +383,27 @@ export function LeafletMap() {
     photoLayersRef.current = [];
   }, [clearPhotosFlag]);
 
-  // ── Update drone marker position from each arriving photo ───────────────────
-  // (Telemetry doesn't carry lat/lon in the current contract; photos do.)
+  // ── Update drone marker position from telemetry and/or photos ───────────────
   useEffect(() => {
     if (!socket) return;
-    const onPhoto = (data) => {
-      if (!data?.lat || !data?.lon) return;
+    const moveMarker = (data) => {
+      if (typeof data?.lat !== 'number' || typeof data?.lon !== 'number') return;
       const marker = droneMarkerRef.current;
       if (marker) marker.setLatLng([data.lat, data.lon]);
+
+      // First live fix: pan the map to the drone so it isn't lost off-screen
+      // if the drone's real position is far from the default campus view.
+      if (!hasCenteredOnDroneRef.current && mapInstanceRef.current) {
+        hasCenteredOnDroneRef.current = true;
+        mapInstanceRef.current.panTo([data.lat, data.lon]);
+      }
     };
-    socket.on('drone_photo', onPhoto);
-    return () => socket.off('drone_photo', onPhoto);
+    socket.on('drone_telemetry', moveMarker);
+    socket.on('drone_photo', moveMarker);
+    return () => {
+      socket.off('drone_telemetry', moveMarker);
+      socket.off('drone_photo', moveMarker);
+    };
   }, [socket]);
 
   return (

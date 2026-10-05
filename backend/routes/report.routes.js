@@ -3,7 +3,17 @@ const fs = require("fs");
 const path = require("path");
 const generatePDF = require("../services/pdf.service");
 const ReportDataService = require("../services/reportData.service");
+const WasteDetectionModel = require("../models/wasteDetection.model");
 const { getCurrentSession } = require("../socket.io");
+
+const CATEGORY_DISPLAY_NAMES = {
+  "kağıt": "Kağıt",
+  "cam": "Cam",
+  "plastik": "Plastik",
+  "metal": "Metal",
+  "geri dönüştürülemez": "Geri Dönüştürülemez",
+  "organik": "Organik"
+};
 
 const router = express.Router();
 
@@ -39,15 +49,20 @@ router.post("/generate", async (req, res) => {
     // Arka planda PDF oluştur
     const reportData = await ReportDataService.generateReportData(sessionId);
 
-    const tumKategoriler = [
-      { ad: "Metal", adet: 12, oran: 12 },
-      { ad: "Karton", adet: 8, oran: 8 },
-      { ad: "Kağıt", adet: 14, oran: 14 },
-      { ad: "Cam", adet: 6, oran: 6 },
-      { ad: "Organik Atık", adet: 22, oran: 22 },
-      { ad: "Geri Dönüştürülemez", adet: 18, oran: 18 },
-      { ad: "Plastik", adet: 20, oran: 20 }
-    ];
+    // Gerçek YOLO tespit sayıları (waste_detections tablosundan)
+    const categoryCounts = await WasteDetectionModel.getCategoryCounts(sessionId);
+    const totalDetections = categoryCounts.reduce((sum, c) => sum + c.count, 0);
+    const countByCategory = Object.fromEntries(categoryCounts.map(c => [c.category, c.count]));
+
+    const tumKategoriler = Object.entries(CATEGORY_DISPLAY_NAMES).map(([key, ad]) => {
+      const adet = countByCategory[key] || 0;
+      const oran = totalDetections > 0 ? Math.round((adet / totalDetections) * 100) : 0;
+      return { ad, adet, oran };
+    });
+
+    // reportData.service.js'deki placeholder'ı gerçek toplam tespit sayısıyla değiştir
+    // (html replace loop'undan ÖNCE yapılmalı, yoksa {{genelDegerlendirme}} zaten tüketilmiş olur)
+    reportData.genelDegerlendirme = `${totalDetections} tespit`;
 
     // Kullanıcının seçtiği kategorilerle filtrele (gelmezse tümünü dahil et)
     const seciliKategoriAdlari = req.body.kategoriler;

@@ -665,6 +665,175 @@ private fun handleStopMission() {
 }
 ```
 
+### 6.9 — WAYPOINT FOTOĞRAFI (`drone_photo`)
+
+Her waypoint'te (`actions: ["shoot_photo"]` işaretliyse) fotoğraf çekip küçük bir
+JPEG önizlemesini GPS koordinatıyla birlikte web'e gönderir. Web tarafı bunu
+zaten dinliyor ve haritada fotoğrafın çekildiği konuma otomatik olarak overlay
+basıyor — eksik olan tek şey bu fonksiyonun Android'de tetiklenmesi.
+
+**Ne zaman tetiklenir:** `missionStateListener` içinde waypoint indeksi
+değiştiğinde (§6.7'deki `missionStateListener`'ın devamı), o waypoint'in
+action listesinde `"shoot_photo"` varsa.
+
+```kotlin
+import dji.sdk.keyvalue.key.CameraKey
+import dji.sdk.keyvalue.key.KeyTools
+import dji.sdk.keyvalue.value.common.ComponentIndexType
+import dji.sdk.keyvalue.value.common.EmptyMsg
+import dji.v5.manager.datacenter.MediaDataCenter
+import dji.v5.manager.datacenter.media.MediaFile
+import dji.v5.common.callback.CommonCallbacks
+import dji.v5.common.error.IDJIError
+import android.graphics.Bitmap
+import android.os.Handler
+import android.os.Looper
+import android.util.Base64
+import android.util.Log
+import java.io.ByteArrayOutputStream
+
+private const val CAMERA_INDEX = ComponentIndexType.LEFT_OR_MAIN // Mini 4 Pro tek kamera
+
+/**
+ * WP index'e ulaşıldığında çağır (missionStateListener içinden).
+ * wpActions: o waypoint'in "actions" listesi — "shoot_photo" içermiyorsa atla.
+ *
+ * İki güvenlik kontrolü:
+ *  1) Drone havada değilse (henüz kalkmadıysa) çekim tamamen atlanır —
+ *     kalkış öncesi/kalkış noktasında kötü bir ilk fotoğraf çekilmesini önler.
+ *  2) Çekimden önce gimbal her seferinde tekrar nadire (−90°) zorlanır —
+ *     transit sırasında düz bakışa dönmüş olsa bile çekim anında düzeltilir.
+ */
+private fun onWaypointReached(wpIndex: Int, wpActions: List<String>) {
+    if ("shoot_photo" !in wpActions) return
+
+    if (!isAircraftFlying()) {
+        Log.w("WaypointPhoto", "WP $wpIndex: drone henüz havada değil, çekim atlanıyor")
+        return
+    }
+
+    aimNadirThenShoot(wpIndex)
+}
+
+/**
+ * Drone fiilen havada mı? (kalkıştan önceki sahte ilk çekimi engellemek için)
+ *
+ * GÜNCELLEME: KeyIsFlying güvenilmez çıktı (sürekli false dönüp HİÇBİR
+ * waypoint'te çekim tetiklenmemesine yol açtı — sadece kalkıştaki değil,
+ * sonraki tüm çekimleri de engelledi). Ayrı bir "isFlying" key'ine güvenmek
+ * yerine, telemetride zaten sorunsuz çalışan irtifa okumasını kullanıyoruz.
+ */
+private fun isAircraftFlying(): Boolean {
+    return getAltitude().agl > 1.5f  // ~1.5 m üzeri = havada kabul et
+}
+
+/**
+ * Çekimden önce gimbal'i mutlak −90° (dik aşağı) açıya döndürür, fiilen o açıya
+ * ulaşması için kısa bir ek bekleme yapar, sonra fotoğrafı çeker. §6.5'teki
+ * handleGimbalPitch ile aynı Rotation API'sini kullanır ama "bekle + sonra çek"
+ * sırasını garanti eder.
+ */
+private fun aimNadirThenShoot(wpIndex: Int) {
+    val rotation = Rotation.Builder()
+        .pitch(-90f)
+        .mode(RotationMode.ABSOLUTE_ANGLE)
+        .time(1.0)  // hızlı dönüş — çekim gecikmesini artırmamak için
+        .build()
+
+    GimbalManager.getInstance().rotate(
+        rotation,
+        object : CommonCallbacks.CompletionCallback {
+            override fun onSuccess() {
+                // rotate() "başladı" anlamına gelir, fiilen −90°'ye oturması için
+                // küçük bir ek bekleme (mekanik gimbal'in son birkaç derecesi yavaş olabilir).
+                Handler(Looper.getMainLooper()).postDelayed(
+                    { shootPhotoAndSend(wpIndex) }, 400L
+                )
+            }
+            override fun onFailure(error: IDJIError) {
+                Log.e("WaypointPhoto", "WP $wpIndex gimbal nadir hatası: ${error.description()} — yine de çekiliyor")
+                shootPhotoAndSend(wpIndex)
+            }
+        }
+    )
+}
+
+/** 1) Fotoğrafı çek. 2) Kamera işleyip SD karta yazana kadar kısa bekle. 3) Gönder. */
+private fun shootPhotoAndSend(wpIndex: Int) {
+    val shootKey = KeyTools.createKey(CameraKey.KeyStartShootPhoto, CAMERA_INDEX)
+
+    KeyManager.getInstance().performAction(
+        shootKey,
+        null,
+        object : CommonCallbacks.CompletionCallbackWithParam<EmptyMsg> {
+            override fun onSuccess(result: EmptyMsg?) {
+                Log.i("WaypointPhoto", "WP $wpIndex fotoğraf çekildi, işleniyor…")
+                // Kameranın fotoğrafı SD karta yazıp media listesine eklemesi için
+                // kısa bir gecikme — cihaza göre 800–1500ms arası ayarlanabilir.
+                Handler(Looper.getMainLooper()).postDelayed(
+                    { fetchLatestThumbnailAndSend(wpIndex) }, 1200L
+                )
+            }
+            override fun onFailure(error: IDJIError) {
+                Log.e("WaypointPhoto", "Fotoğraf çekme hatası: ${error.description()}")
+            }
+        }
+    )
+}
+
+/** SD karttaki en son medya dosyasının küçük önizlemesini çekip base64 olarak yollar. */
+private fun fetchLatestThumbnailAndSend(wpIndex: Int) {
+    val mediaManager = MediaDataCenter.getInstance().mediaManager
+
+    mediaManager.getMediaFileListData(CAMERA_INDEX)?.getData()?.let { files ->
+        val latest: MediaFile = files.maxByOrNull { it.timeCreated } ?: run {
+            Log.w("WaypointPhoto", "Medya listesi boş, WP $wpIndex fotoğrafı gönderilemedi")
+            return
+        }
+
+        latest.pullThumbnailFromCamera(object : CommonCallbacks.CompletionCallbackWithParam<Bitmap> {
+            override fun onSuccess(bitmap: Bitmap?) {
+                if (bitmap == null) return
+                sendPhotoPayload(bitmap, wpIndex)
+            }
+            override fun onFailure(error: IDJIError) {
+                Log.e("WaypointPhoto", "Thumbnail indirme hatası: ${error.description()}")
+            }
+        })
+    }
+}
+
+/** Bitmap'i sıkıştırıp (~100 KB hedef) GPS/irtifa/heading ile birlikte socket'e yollar. */
+private fun sendPhotoPayload(bitmap: Bitmap, wpIndex: Int) {
+    val baos = ByteArrayOutputStream()
+    bitmap.compress(Bitmap.CompressFormat.JPEG, 60, baos) // kalite 60 → küçük dosya
+    val base64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
+
+    val pos = getGpsCoordinates()      // §4'te tanımlı — {lat, lon}
+    val alt = getAltitude()            // §4'te tanımlı — {agl, amsl}
+    val heading = KeyManager.getInstance()
+        .getValue(KeyTools.createKey(FlightControllerKey.KeyCompassHeading)) ?: 0.0
+
+    socket.emit("drone_photo", JSONObject().apply {
+        put("imageBase64", "data:image/jpeg;base64,$base64")
+        put("lat", pos.lat)
+        put("lon", pos.lon)
+        put("altitude", alt.agl)
+        put("heading", heading)
+        put("timestamp", System.currentTimeMillis())
+    })
+
+    Log.i("WaypointPhoto", "WP $wpIndex fotoğrafı gönderildi (${baos.size() / 1024} KB)")
+}
+```
+
+> **Notlar / dikkat edilmesi gerekenler:**
+> - `pullThumbnailFromCamera` yerine cihazınızda `pullPreviewImageFromCamera` da kullanılabilir (biraz daha büyük/kaliteli görsel) — API adı SDK 5.17.0'da farklıysa DJI'nin `MediaFile` sınıfındaki güncel metod imzasını kontrol edin.
+> - JPEG kalitesini (`60`) ayarlayarak dosya boyutunu backend yorumundaki **~100 KB** hedefine göre kalibre edin; büyük base64 payload'lar socket.io mesaj boyutu sınırına takılabilir.
+> - `missionStateListener`'da her waypoint'in kendi `actions` listesine erişiminiz yoksa, gönderilen `mission.waypoints[]` dizisini bir class-level değişkende saklayıp `wpIndex` ile eşleştirin.
+> - `KeyIsFlying` sizin SDK sürümünüzde farklı bir key adıyla geliyorsa (bazı MSDK v5 sürümlerinde `FlightControllerKey.KeyIsFlying` yerine `KeyAircraftIsFlying` olabilir), o karşılığı kullanın — önemli olan mantık: **kalkış tamamlanmadan çekim yapılmaması**.
+> - `aimNadirThenShoot`'taki `400L`'lik ek bekleme, gimbal'in mekanik olarak −90°'ye tam oturması için bir tampon — sahada test edip gerekirse 200–800ms arasında ayarlayın.
+
 ---
 
 ## 7. Android → Backend: Engel Bildirimi (Opsiyonel)
@@ -928,3 +1097,127 @@ socket.disconnect()
 - Waypoint görevinde her waypoint geçilince `mission_progress` gönderilmesi web'deki progress bar'ı günceller.
 - Drone bağlantısı kesilirse backend otomatik olarak `session_ended` eventi web'e gönderir, uçuş seansını kapatır.
 - Backend CORS tamamen açık (`*`), socket bağlantısı için herhangi bir auth token gerekmez.
+
+---
+
+## 17. Uçuş Sonrası Fotoğraf Yükleme (Toplu YOLO Çöp Sınıflandırması)
+
+Bu, §6.9'daki (waypoint fotoğrafı) akıştan **ayrı ve ek** bir özellik.
+§6.9'da her waypoint'te çekilen fotoğrafın küçük bir **thumbnail**'i
+`drone_photo` ile canlı harita önizlemesi için gönderiliyordu. Bu bölüm,
+**iniş sonrası**, o uçuşta çekilen fotoğrafların **orijinal/tam
+çözünürlüklü** SD kart dosyalarını sunucuya HTTP ile yükleyip YOLO tabanlı
+çöp sınıflandırması (kağıt/cam/plastik/metal/diğer) yapılmasını sağlıyor.
+
+### Ne zaman tetiklenir
+
+`mission_complete` gönderildikten (ya da iniş onaylandıktan) sonra,
+Android o uçuşta çekilen tüm fotoğrafları tek tek yükler. **Analizi
+Android tetiklemez** — web dashboard'daki "Fotoğrafları Analiz Et"
+butonu tetikler (rapor oluşturmayla aynı, kullanıcı kontrollü desen).
+Android'in tek görevi: fotoğrafları güvenilir şekilde sunucuya taşımak.
+
+### Endpoint
+
+```
+POST http://<backend-ip>:3001/api/photos/upload
+Content-Type: multipart/form-data
+
+file          — orijinal JPEG (SD karttan, thumbnail DEĞİL)
+sessionId     — o uçuşun session id'si (session_started'tan gelen)
+areaId        — (opsiyonel) taranan alanın id'si
+lat           — fotoğrafın çekildiği enlem
+lon           — fotoğrafın çekildiği boylam
+altitude      — AGL irtifa (metre)
+heading       — pusula yönü (derece)
+capturedAt    — çekim zamanı (Unix ms)
+```
+
+Yanıt (201): kaydedilen `photos` satırı, `{ id, session_id, file_path, ... }`.
+
+### Orijinal dosyayı SD karttan indirme
+
+§6.9'daki `fetchLatestThumbnailAndSend`'de `pullThumbnailFromCamera`
+kullanılmıştı (küçük önizleme). Bu sefer **tam boyutlu** dosya
+gerekiyor — DJI MSDK v5'in `MediaFile` sınıfında buna karşılık gelen
+metod muhtemelen `pullOriginalMediaFileFromCamera` (indirme ilerlemesini
+bir callback ile bildiren, birkaç MB'lık gerçek dosya transferi
+yapan bir metod) — **kesin metod adı ve imzası MSDK 5.17.0
+dokümantasyonunda teyit edilmeli**, önceki notlarımızdaki gibi bir
+belirsizlik bu da.
+
+```kotlin
+import okhttp3.MultipartBody
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.File
+
+private val httpClient = OkHttpClient()
+private const val BACKEND_UPLOAD_URL = "http://192.168.1.XXX:3001/api/photos/upload"
+
+/**
+ * Uçuş sonrası çağrılır — o session'da çekilen tüm fotoğrafları sırayla yükler.
+ * capturedPhotos: her waypoint'te (§6.9) toplanan {file, lat, lon, altitude, heading, timestamp} listesi.
+ */
+private fun uploadFlightPhotos(sessionId: Int, capturedPhotos: List<CapturedPhoto>) {
+    capturedPhotos.forEach { photo ->
+        uploadSinglePhoto(sessionId, photo)
+    }
+}
+
+private fun uploadSinglePhoto(sessionId: Int, photo: CapturedPhoto) {
+    val file = File(photo.localFilePath)
+    if (!file.exists()) {
+        Log.w("PhotoUpload", "Dosya bulunamadı, atlanıyor: ${photo.localFilePath}")
+        return
+    }
+
+    val body = MultipartBody.Builder()
+        .setType(MultipartBody.FORM)
+        .addFormDataPart("file", file.name, file.asRequestBody("image/jpeg".toMediaType()))
+        .addFormDataPart("sessionId", sessionId.toString())
+        .addFormDataPart("lat", photo.lat.toString())
+        .addFormDataPart("lon", photo.lon.toString())
+        .addFormDataPart("altitude", photo.altitude.toString())
+        .addFormDataPart("heading", photo.heading.toString())
+        .addFormDataPart("capturedAt", photo.timestamp.toString())
+        .build()
+
+    val request = Request.Builder().url(BACKEND_UPLOAD_URL).post(body).build()
+
+    httpClient.newCall(request).execute().use { response ->
+        if (response.isSuccessful) {
+            Log.i("PhotoUpload", "Yüklendi: ${file.name}")
+        } else {
+            Log.e("PhotoUpload", "Yükleme hatası (${response.code}): ${file.name}")
+        }
+    }
+}
+```
+
+> **Notlar:**
+> - Bu senkron (`execute()`) çağrı örneği basitlik için — gerçek uygulamada
+>   bir arka plan thread/coroutine içinde çalıştırılmalı, ana thread'i
+>   bloklamamalı.
+> - `OkHttpClient` projede zaten yoksa eklenmesi gerekir (`com.squareup.okhttp3:okhttp`)
+>   — ya da Android'in `HttpURLConnection`'ı ile eşdeğer bir multipart
+>   istek de kurulabilir.
+> - Yükleme başarısız olursa (ağ kopması vb.) o fotoğraf kaybolur —
+>   isterseniz basit bir retry (2-3 deneme) eklenebilir, backend idempotent
+>   değil (her başarılı istek yeni bir `photos` satırı oluşturur).
+> - Analiz endpoint'i (`POST /api/photos/sessions/:id/classify`) Android
+>   tarafından çağrılmaz, sadece web dashboard'dan tetiklenir.
+
+---
+
+## 18. Fotoğraf Mozaiği — Kenar Kenara Yoğun Waypoint'ler
+
+**Ayrı bir belgeye taşındı:** [`ANDROID_MOSAIC_UPDATE.md`](./ANDROID_MOSAIC_UPDATE.md)
+
+Sunucu tarafında (`waypointPlanner.service.js`) yapılan bir değişikliği
+ve Android'de kontrol edilmesi/değişmesi gereken 5 maddeyi (DJI waypoint
+limiti, çekim temposu, gimbal tutarlılığı, toplu yükleme hacmi, heading)
+özetliyor — bağımsız, Android geliştiriciye doğrudan iletilebilecek bir
+belge olması için burada tekrar etmiyoruz, güncel kaynak orada.

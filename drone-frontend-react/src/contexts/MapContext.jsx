@@ -25,6 +25,14 @@ export function MapProvider({ children }) {
   // Bumping this triggers LeafletMap to remove all photo overlays from the canvas
   const [clearPhotosFlag, setClearPhotosFlag] = useState(0);
 
+  // YOLO waste detections for the currently analyzed session — shown as
+  // colored markers on the map. Array<{id, category, confidence, lat, lon}> | null
+  const [wasteDetections, setWasteDetections] = useState(null);
+
+  // Stitched ODM orthomosaic for the currently analyzed session — a single
+  // north-aligned image overlay. {url, bounds:{swLat,swLon,neLat,neLon}} | null
+  const [orthomosaicLayer, setOrthomosaicLayer] = useState(null);
+
   /**
    * Load areas from database
    */
@@ -176,7 +184,11 @@ export function MapProvider({ children }) {
       photoCount,
       incrementPhotoCount,
       clearPhotoOverlays,
-      clearPhotosFlag
+      clearPhotosFlag,
+      wasteDetections,
+      setWasteDetections,
+      orthomosaicLayer,
+      setOrthomosaicLayer
     }),
     [
       map,
@@ -195,7 +207,9 @@ export function MapProvider({ children }) {
       photoCount,
       incrementPhotoCount,
       clearPhotoOverlays,
-      clearPhotosFlag
+      clearPhotosFlag,
+      wasteDetections,
+      orthomosaicLayer
     ]
   );
 

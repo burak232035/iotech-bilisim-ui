@@ -15,6 +15,9 @@ import { GpsCard } from '@components/telemetry/GpsCard';
 import { DroneControls } from '@components/dashboard/DroneControls';
 import { ActionButtons } from '@components/dashboard/ActionButtons';
 import { ReportGenerator } from '@components/dashboard/ReportGenerator';
+import { WasteAnalysisPanel } from '@components/dashboard/WasteAnalysisPanel';
+import { GreenConcretePanel } from '@components/dashboard/GreenConcretePanel';
+import { OrthomosaicPanel } from '@components/dashboard/OrthomosaicPanel';
 import { MissionPlanner } from '@components/dashboard/MissionPlanner';
 import { useMap } from '@contexts/MapContext';
 
@@ -108,6 +111,15 @@ export default function DashboardPage() {
 
           {/* ACTION BUTTONS */}
           <ActionButtons />
+
+          {/* WASTE CLASSIFICATION (YOLO) */}
+          <WasteAnalysisPanel />
+
+          {/* GREEN/CONCRETE RATIO (YOLO-seg) */}
+          <GreenConcretePanel />
+
+          {/* ORTHOMOSAIC (OpenDroneMap) */}
+          <OrthomosaicPanel />
 
           {/* REPORT GENERATOR */}
           <ReportGenerator />

@@ -18,6 +18,7 @@
 
 const EARTH_R = 6371000;           // metres
 const HFOV_DEG = 82.1;             // DJI Mini 4 Pro horizontal FOV
+const PHOTO_ASPECT = 4 / 3;        // width / height — same as LeafletMap.jsx / geoProjection.service.js
 const OBSTACLE_BUFFER_M = 8;       // safety margin added to obstacle radius
 
 class WaypointPlannerService {
@@ -27,39 +28,56 @@ class WaypointPlannerService {
    *
    * @param {Array<[number,number]>} polygonPoints  [[lat,lon], …]  min 3 pts
    * @param {Array<{lat,lon,radius_m}>} obstacles   (may be empty)
-   * @param {{ altitudeM, overlapPercent, speedMs, homeLat, homeLon }} options
+   * @param {{ altitudeM, overlapPercent, frontOverlapPercent, speedMs, homeLat, homeLon }} options
    *        homeLat/homeLon (optional): drone's current/takeoff position. When given,
    *        the route is oriented (forward or reversed) so it starts at whichever end
    *        is closer to home — the drone is never assumed to already be at waypoint 0.
    * @returns {{
-   *   waypoints:       Array<{lat,lon,altitude,speed,actions}>,
-   *   totalDistanceM:  number,
-   *   waypointCount:   number,
-   *   stripSpacingM:   number,
-   *   footprintWidthM: number,
-   *   sweepAngleDeg:   number,
-   *   homeDistanceM:   number|null   // distance from home to the (possibly reordered) first waypoint
+   *   waypoints:            Array<{lat,lon,altitude,speed,actions}>,
+   *   totalDistanceM:       number,
+   *   waypointCount:        number,
+   *   stripSpacingM:        number,
+   *   footprintWidthM:      number,
+   *   footprintHeightM:     number,
+   *   alongTrackSpacingM:   number,
+   *   sweepAngleDeg:        number,
+   *   homeDistanceM:        number|null   // distance from home to the (possibly reordered) first waypoint
    * }}
+   *
+   * Along-track spacing: consecutive waypoints within a strip are placed
+   * `footprintHeightM * (1 - frontOverlapPercent/100)` apart. Real
+   * photogrammetric stitching (orthomosaic) needs genuine overlap to find
+   * matching features between neighbouring photos — plain edge-to-edge
+   * placement (0% overlap) looks fine as individually-georeferenced tiles
+   * but can't be feature-matched into a seamless mosaic. Cross-track
+   * (strip-to-strip) spacing uses overlapPercent as before, just at a
+   * photogrammetry-appropriate default now.
    */
   static generateScanRoute(polygonPoints, obstacles = [], options = {}) {
     const {
-      altitudeM      = 50,
-      overlapPercent = 70,
-      speedMs        = 8,
-      homeLat        = null,
-      homeLon        = null
+      altitudeM           = 50,
+      overlapPercent      = 65,   // cross-track (strip-to-strip) — photogrammetry default
+      frontOverlapPercent = 75,   // along-track (within-strip) — photogrammetry default
+      speedMs             = 8,
+      homeLat             = null,
+      homeLon             = null
     } = options;
 
     if (!Array.isArray(polygonPoints) || polygonPoints.length < 3) {
       throw new Error("Geçersiz poligon: en az 3 nokta gerekli");
     }
 
-    // Camera footprint and strip spacing
-    const footprintWidthM = 2 * altitudeM * Math.tan((HFOV_DEG / 2) * Math.PI / 180);
-    const stripSpacingM   = footprintWidthM * (1 - overlapPercent / 100);
+    // Camera footprint, strip spacing (cross-track) and shot spacing (along-track)
+    const footprintWidthM   = 2 * altitudeM * Math.tan((HFOV_DEG / 2) * Math.PI / 180);
+    const footprintHeightM  = footprintWidthM / PHOTO_ASPECT; // raw along-track footprint size
+    const stripSpacingM     = footprintWidthM * (1 - overlapPercent / 100);
+    const alongTrackSpacingM = footprintHeightM * (1 - frontOverlapPercent / 100);
 
     if (stripSpacingM < 0.5) {
       throw new Error("Çakışma oranı çok yüksek: şerit aralığı < 0.5 m");
+    }
+    if (alongTrackSpacingM < 0.5) {
+      throw new Error("İleri çakışma oranı çok yüksek: çekim aralığı < 0.5 m");
     }
 
     // Remove duplicate closing point if present
@@ -139,7 +157,11 @@ class WaypointPlannerService {
           dir
         );
 
-        for (const rPt of pts2D) {
+        // Subdivide into alongTrackSpacingM steps so consecutive photos
+        // have real overlap for photogrammetric stitching (see class-level doc).
+        const densePts = this._densifyPath(pts2D, alongTrackSpacingM);
+
+        for (const rPt of densePts) {
           const origPt = this._rotate(rPt, sweepRad);
           const ll     = this._fromLocal(origPt, centroid);
 
@@ -180,12 +202,14 @@ class WaypointPlannerService {
 
     return {
       waypoints,
-      totalDistanceM:  Math.round(totalDistM),
-      waypointCount:   waypoints.length,
-      stripSpacingM:   Math.round(stripSpacingM * 10) / 10,
-      footprintWidthM: Math.round(footprintWidthM * 10) / 10,
-      sweepAngleDeg:   Math.round(sweepAngleDeg * 10) / 10,
-      homeDistanceM:   homeDistanceM !== null ? Math.round(homeDistanceM) : null
+      totalDistanceM:     Math.round(totalDistM),
+      waypointCount:      waypoints.length,
+      stripSpacingM:      Math.round(stripSpacingM * 10) / 10,
+      footprintWidthM:    Math.round(footprintWidthM * 10) / 10,
+      footprintHeightM:   Math.round(footprintHeightM * 10) / 10,
+      alongTrackSpacingM: Math.round(alongTrackSpacingM * 10) / 10,
+      sweepAngleDeg:      Math.round(sweepAngleDeg * 10) / 10,
+      homeDistanceM:      homeDistanceM !== null ? Math.round(homeDistanceM) : null
     };
   }
 
@@ -283,6 +307,59 @@ class WaypointPlannerService {
 
     pts.push(to);
     return pts;
+  }
+
+  /**
+   * Walk a connected path (straight legs between consecutive points,
+   * e.g. a strip endpoint-to-endpoint line with obstacle-bypass corners)
+   * and place points at a FIXED interval of `spacingM` measured along the
+   * whole path's cumulative length.
+   *
+   * Deliberately NOT "divide this leg into N equal parts" — dividing to
+   * fit exactly inside the leg rounds the actual step size up or down
+   * depending on how the leg length compares to spacingM, which produces
+   * a gap (step rounded up) or an overlap (step rounded down) between
+   * consecutive photo frames. Fixed-interval stepping keeps every step
+   * exactly spacingM apart with zero drift; the last shot of the path may
+   * land slightly past the polygon boundary rather than being compressed
+   * to fit inside it — the drone flies a touch outside the drawn area
+   * instead of leaving a gap or double-shooting the same ground.
+   *
+   * @param {Array<{x,y}>} pts
+   * @param {number} spacingM
+   * @returns {Array<{x,y}>}
+   */
+  static _densifyPath(pts, spacingM) {
+    if (pts.length < 2 || !(spacingM > 0)) return pts.slice();
+
+    const legs = [];
+    let totalLen = 0;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i + 1];
+      const len = this._dist(a, b);
+      if (len === 0) continue;
+      legs.push({ a, dx: (b.x - a.x) / len, dy: (b.y - a.y) / len, start: totalLen, len });
+      totalLen += len;
+    }
+    if (legs.length === 0) return [pts[0]];
+
+    const dense = [pts[0]];
+    let legIdx = 0;
+    let dist = spacingM;
+
+    while (true) {
+      while (legIdx < legs.length - 1 && dist > legs[legIdx].start + legs[legIdx].len) {
+        legIdx++;
+      }
+      const leg = legs[legIdx];
+      const legDist = dist - leg.start; // may exceed leg.len only on the final leg (intentional overshoot)
+      dense.push({ x: leg.a.x + leg.dx * legDist, y: leg.a.y + leg.dy * legDist });
+
+      if (dist >= totalLen) break;
+      dist += spacingM;
+    }
+
+    return dense;
   }
 
   static _centroid(pts) {

@@ -11,23 +11,29 @@ const router = express.Router();
  * POST /api/mission/plan
  * Compute boustrophedon scan waypoints for an area and optionally persist the route.
  *
- * Body: { areaId, altitudeM?, overlapPercent?, speedMs?, saveRoute?, homeLat?, homeLon? }
+ * Body: { areaId, altitudeM?, overlapPercent?, frontOverlapPercent?, speedMs?, saveRoute?, homeLat?, homeLon? }
  *
  * homeLat/homeLon (optional): drone's current/takeoff position. If omitted, falls back
  * to the last known position reported by the drone (telemetry or drone_photo). Used to
  * orient the route so it starts at whichever end is closest to the drone — it can't be
  * guaranteed the drone is sitting exactly on waypoint 0.
+ *
+ * overlapPercent (cross-track, strip-to-strip) and frontOverlapPercent (along-track,
+ * within-strip) both default to real photogrammetric-stitching values (65% / 75%) —
+ * needed for the orthomosaic pipeline to find matching features between neighbouring
+ * photos. Lower them toward 0 only if you just want individually-georeferenced tiles.
  */
 router.post("/plan", async (req, res) => {
   try {
     const {
       areaId,
-      altitudeM      = 50,
-      overlapPercent = 70,
-      speedMs        = 8,
-      saveRoute      = true,
-      homeLat        = null,
-      homeLon        = null
+      altitudeM           = 50,
+      overlapPercent      = 65,
+      frontOverlapPercent = 75,
+      speedMs             = 8,
+      saveRoute           = true,
+      homeLat             = null,
+      homeLon             = null
     } = req.body;
 
     if (!areaId) {
@@ -54,11 +60,12 @@ router.post("/plan", async (req, res) => {
       polygonPoints,
       obstacles,
       {
-        altitudeM:      Number(altitudeM),
-        overlapPercent: Number(overlapPercent),
-        speedMs:        Number(speedMs),
-        homeLat:        resolvedHomeLat,
-        homeLon:        resolvedHomeLon
+        altitudeM:           Number(altitudeM),
+        overlapPercent:      Number(overlapPercent),
+        frontOverlapPercent: Number(frontOverlapPercent),
+        speedMs:             Number(speedMs),
+        homeLat:             resolvedHomeLat,
+        homeLon:             resolvedHomeLon
       }
     );
 

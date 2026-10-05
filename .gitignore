@@ -32,5 +32,22 @@ belgeler/
 # Generated PDF reports (runtime output)
 backend/reports/generated/*.pdf
 
+# Uploaded flight photos (runtime output)
+backend/uploads/
+
+# Orthomosaic job workspace (temp — input photo copies + ODM intermediates)
+backend/orthomosaic-jobs/
+
+# Python venv / YOLO model weights
+waste-detection-service/.venv/
+waste-detection-service/model/*.pt
+waste-detection-service/model/*.onnx
+waste-detection-service/__pycache__/
+
+green-concrete-service/.venv/
+green-concrete-service/model/*.pt
+green-concrete-service/model/*.onnx
+green-concrete-service/__pycache__/
+
 # Stray Windows artifact
 nul
