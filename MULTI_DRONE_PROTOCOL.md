@@ -1,11 +1,9 @@
 # Çoklu Drone Protokolü (Socket.IO, protokol v2)
 
 > **Durum (Ekim 2026):** Android (drone-2 / Redmi) protokol v2'yi tamamladı.
-> **Backend uygulandı** ve test sunucusunda (port 3002) simülasyonla
-> doğrulandı. **Dashboard henüz çoklu drone'a uyarlanmadı:** drone seçici
-> yok, bu yüzden iki drone bağlıyken dashboard'dan gönderilen hedefsiz
-> komutlar backend tarafından reddedilir (hiçbir drone'a gitmez). İlk saha
-> testleri tek drone ile yapılmalıdır.
+> **Backend ve dashboard uygulandı**, test sunucusunda (port 3002) iki
+> simüle drone ile doğrulandı. Sahada henüz iki drone birlikte uçurulmadı.
+> Tablet (drone-1) v2'ye geçene kadar iki drone'a birlikte görev verilemez (§6.3).
 
 Bu doküman, iki (veya daha fazla) DJI Mini 4 Pro'nun aynı anda, her biri ayrı
 bir Android cihaz + kumanda üzerinden tek bir backend'e bağlanması için
@@ -289,9 +287,20 @@ waypoint listesiyle alır. Eski arayüzün `start_area_scan` komutu kullanılmaz
 
 ## 8. Dashboard
 
-- Drone seçici; komutlar seçili drone'a gider.
-- Acil durum butonlarında ek "Tümü" seçeneği (§3.3) — `hover` hariç.
-- Haritada her drone farklı renkte, varsa yön oku ve kalkış noktasıyla.
+- **Drone seçici** (haritanın üstünde): her drone bir kart; bağlantı, batarya,
+  uçuş modu, görevdeyse RTH irtifası ve eski sürüm (v1) uyarısı görünür.
+  Seçili drone; komutların, görevlerin ve telemetri kartlarının hedefidir.
+  Seçili drone bağlantıyı kaybederse seçim **otomatik değişmez** (komutlar
+  sessizce başka drone'a gitmesin diye); komutlar backend'de reddedilir.
+- **"Tümü" butonları:** Acil İniş, Eve Dön, Görevi Durdur (`hover` yok, §3.3).
+- **Harita:** her drone kendi renginde, adı, yön oku (`heading`) ve "H"
+  kalkış noktası (`home`) ile.
+- **Görev planlayıcı:** görev seçili drone'a gider; varsayılan planlama
+  irtifası drone-1 30 m, drone-2 40 m (+10 m); irtifa seçiminde başka bir
+  drone'un görev irtifasına 10 m'den yakınsa uyarı; backend'in RTH değeri ve
+  uyarıları ekranda gösterilir; "Görevi Durdur" seçili drone'un görevini durdurur.
+- **Elle kontrol paneli:** hedef, panel açıldığı anda sabitlenir; panel
+  açıkken başka drone seçilse de joystick komutları ilk drone'a gider.
 
 ## 9. Test ortamı
 
@@ -349,11 +358,12 @@ npm --prefix drone-frontend-react run dev:test   # dashboard → http://localhos
 - [x] RTH hesaplama, 120 m kontrolü, kalkış rakımı uyarısı (eşik: `HOME_ALT_WARN_DIFF_M`, varsayılan 3)
 - [x] Başka drone varken v1 istemciye/istemciyle görevin reddi (§6.3)
 - [x] `"all" → hover` geçici olarak kapalı (§3.3)
-- [ ] `drone-2` için varsayılan +10 m görev irtifası (planlama/dashboard ile birlikte)
+- [x] `drone-2` için varsayılan +10 m görev irtifası (dashboard'da)
 - [ ] Alan bazında birleşik ortomozaik
 
 ### Dashboard
 
-- [ ] Drone seçici, "Tümü" acil butonları
-- [ ] Çoklu drone harita gösterimi, isteğe bağlı v2 alanları
-- [ ] Görev planlamada drone seçimi, irtifa/RTH uyarıları
+- [x] Drone seçici, "Tümü" acil butonları
+- [x] Çoklu drone harita gösterimi, isteğe bağlı v2 alanları
+- [x] Görev planlamada drone seçimi, irtifa/RTH uyarıları
+- [x] Elle kontrol panelinde hedef kilidi

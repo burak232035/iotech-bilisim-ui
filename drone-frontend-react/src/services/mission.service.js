@@ -15,7 +15,10 @@ class MissionServiceClass {
     });
     if (!res.ok) {
       const txt = await res.text();
-      throw new Error(`HTTP ${res.status}: ${txt}`);
+      // Backend errors are { error: "…" } — show the message, not the raw JSON
+      let msg = txt;
+      try { msg = JSON.parse(txt).error || txt; } catch { /* not JSON */ }
+      throw new Error(msg);
     }
     return res.json();
   }
@@ -40,16 +43,17 @@ class MissionServiceClass {
   }
 
   /**
-   * Send the pre-planned mission to all connected drones via Socket.IO.
-   * @param {{ waypoints, areaId, areaName, altitudeM, speedMs, savedRouteId }} data
+   * Send the pre-planned mission to one drone (droneId) via Socket.IO.
+   * Response carries the computed rthHeight and an optional warning.
+   * @param {{ droneId, waypoints, areaId, areaName, altitudeM, speedMs, savedRouteId }} data
    */
   startMission(data) {
     return this._post(API_ENDPOINTS.MISSION_START, data);
   }
 
-  /** Send stop/RTH command to all connected drones. */
-  stopMission() {
-    return this._post(API_ENDPOINTS.MISSION_STOP, {});
+  /** Send stop/RTH to one drone, or to every drone with droneId "all". */
+  stopMission(droneId) {
+    return this._post(API_ENDPOINTS.MISSION_STOP, droneId ? { droneId } : {});
   }
 
   /** Check how many drones are connected. */

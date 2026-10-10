@@ -109,6 +109,7 @@ function droneSummary(entry) {
     sessionId:   entry.session ? entry.session.id : null,
     areaId:      entry.activeAreaId,
     rthHeight:   entry.activeMission ? entry.activeMission.rthHeight : null,
+    missionAltitude: entry.activeMission ? entry.activeMission.maxAltitude : null,
     lastPosition: entry.lastPosition,
     connectedAt: entry.connectedAt,
     disconnectedAt: entry.disconnectedAt

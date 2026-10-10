@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Card } from '@components/common/Card';
 import { useSocket } from '@contexts/SocketContext';
+import { droneLabel } from '@utils/constants';
 import { API_BASE_URL } from '@utils/constants';
 
 function ConnectionDiagPanel() {
@@ -158,14 +159,15 @@ function ConnectionDiagPanel() {
 }
 
 export function DroneControls() {
-  const { sendCommand, isConnected } = useSocket();
+  const { sendCommand, isConnected, selectedDroneId } = useSocket();
+  const target = selectedDroneId ? droneLabel(selectedDroneId) : 'Drone';
 
   const handleTakeoff = () => {
     if (!isConnected) {
       alert('Socket bağlantısı yok! Lütfen backend çalıştığından emin olun.');
       return;
     }
-    if (!window.confirm('Drone kalkış yapacak. Emin misiniz?')) return;
+    if (!window.confirm(`${target} kalkış yapacak. Emin misiniz?`)) return;
     sendCommand('takeoff');
   };
 
@@ -174,14 +176,14 @@ export function DroneControls() {
       alert('Socket bağlantısı yok! Lütfen backend çalıştığından emin olun.');
       return;
     }
-    if (!window.confirm('Drone iniş yapacak. Emin misiniz?')) return;
+    if (!window.confirm(`${target} iniş yapacak. Emin misiniz?`)) return;
     sendCommand('land');
   };
 
   return (
     <div className="row mt-3">
       <div className="col-12">
-        <Card title="Drone Kontrol" icon="fas fa-gamepad" variant="danger">
+        <Card title={`Drone Kontrol — ${target}`} icon="fas fa-gamepad" variant="danger">
           <div className="d-flex justify-content-center gap-3">
             <button
               type="button"

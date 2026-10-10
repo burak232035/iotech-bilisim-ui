@@ -12,9 +12,10 @@
  *   command_response — { command, status, error?, timestamp }
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSocket } from '@contexts/SocketContext';
 import { useTelemetry } from '@contexts/TelemetryContext';
+import { droneLabel, droneColor } from '@utils/constants';
 
 // ─── Sabitler ──────────────────────────────────────────────────────────────────
 const STICK_SEND_HZ = 10;   // virtual stick gönderim frekansı
@@ -132,8 +133,22 @@ function ConnBadge({ isConnected, droneStatus }) {
 
 // ─── Ana bileşen ───────────────────────────────────────────────────────────────
 export function ManualControlPanel({ onClose }) {
-  const { socket, isConnected, sendCommand, droneStatus } = useSocket();
-  const { telemetry } = useTelemetry();
+  const { socket, isConnected, sendCommand: sendToSelected, drones, selectedDroneId } = useSocket();
+  const { telemetryByDrone } = useTelemetry();
+
+  // The panel's target is fixed when it opens: selecting another drone while
+  // the joysticks stream virtual_stick at 10 Hz must not retarget them.
+  const [targetDroneId] = useState(selectedDroneId);
+  const sendCommand = useCallback(
+    (command, payload = {}) => sendToSelected(command, { ...payload, droneId: targetDroneId ?? undefined }),
+    [sendToSelected, targetDroneId]
+  );
+  const targetDrone = drones.find(d => d.droneId === targetDroneId);
+  const droneStatus = targetDrone ? (targetDrone.connected ? 'active' : 'waiting') : (drones.length ? 'waiting' : 'unknown');
+  const telemetry = telemetryByDrone[targetDroneId || 'drone-1']?.telemetry ?? {
+    battery: 0, gimbal: { pitch: 0, roll: 0, yaw: 0 }, altitude: { agl: 0, amsl: 0 },
+    gps: { signalLevel: 'WEAK', satelliteCount: 0 }
+  };
 
   // Joystick değerleri (ref — render tetikleme gerekmez)
   const leftRef  = useRef({ x: 0, y: 0 });
@@ -171,15 +186,17 @@ export function ManualControlPanel({ onClose }) {
   useEffect(() => {
     if (!socket) return;
     const handler = (data) => {
+      // Only this panel's drone (responses without droneId come from v1 / backend)
+      if (data?.droneId && targetDroneId && data.droneId !== targetDroneId) return;
       setLastResp(data);
       if (data?.status === 'success')
         flash('success', `✅ "${data.command}" komutu başarılı`);
-      else if (data?.status === 'failed')
+      else if (data?.status === 'failed' || data?.status === 'rejected')
         flash('error', `❌ "${data.command}" başarısız${data.error ? `: ${data.error}` : ''}`);
     };
     socket.on('command_response', handler);
     return () => socket.off('command_response', handler);
-  }, [socket]);
+  }, [socket, targetDroneId]);
 
   // ── Aksiyonlar ──────────────────────────────────────────────────────────────
   const handleHover = () => {
@@ -237,6 +254,14 @@ export function ManualControlPanel({ onClose }) {
                 <i className="fas fa-gamepad me-2"></i>ELLE KONTROL MODU
               </span>
               <ConnBadge isConnected={isConnected} droneStatus={droneStatus} />
+              {targetDroneId && (
+                <span style={{
+                  padding: '3px 10px', borderRadius: 20, fontSize: '0.72rem', fontWeight: 700,
+                  border: `1px solid ${droneColor(targetDroneId)}`, color: droneColor(targetDroneId)
+                }} title="Panel açıkken hedef değişmez; başka drone için paneli kapatıp yeniden açın">
+                  Hedef: {droneLabel(targetDroneId)} (sabit)
+                </span>
+              )}
             </div>
             <button className="btn btn-sm btn-outline-secondary" onClick={onClose}>
               <i className="fas fa-times me-1"></i>Kapat

@@ -19,6 +19,7 @@ import { WasteAnalysisPanel } from '@components/dashboard/WasteAnalysisPanel';
 import { GreenConcretePanel } from '@components/dashboard/GreenConcretePanel';
 import { OrthomosaicPanel } from '@components/dashboard/OrthomosaicPanel';
 import { MissionPlanner } from '@components/dashboard/MissionPlanner';
+import { DroneSelector } from '@components/dashboard/DroneSelector';
 import { useMap } from '@contexts/MapContext';
 
 function PhotoOverlayPanel() {
@@ -59,6 +60,9 @@ export default function DashboardPage() {
 
       <section className="content">
         <div className="container-fluid">
+          {/* DRONE SELECTOR (multi-drone target + "Tümü" emergency commands) */}
+          <DroneSelector />
+
           {/* MAP */}
           <div className="row">
             <div className="col-12">

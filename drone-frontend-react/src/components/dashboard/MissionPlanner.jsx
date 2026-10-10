@@ -14,9 +14,12 @@ import { useMap } from '@contexts/MapContext';
 import { useSocket } from '@contexts/SocketContext';
 import { useTelemetry } from '@contexts/TelemetryContext';
 import { MissionService } from '@services/mission.service';
-import { SOCKET_EVENTS } from '@utils/constants';
+import { SOCKET_EVENTS, droneIndex, droneLabel, droneColor } from '@utils/constants';
 
 const DEFAULT_ALTITUDE  = 30;
+// drone-2 flies 10 m above drone-1 by default (MULTI_DRONE_PROTOCOL.md §6.1)
+const DRONE_ALTITUDE_STEP = 10;
+const MIN_ALTITUDE_SEPARATION = 10;
 const DEFAULT_OVERLAP   = 65; // backend'in fotogrametri-uyumlu varsayılanıyla eşleşiyor
 // Düşük tutulursa (örn. 20-30) canlı harita önizlemesinde daha az kare üst üste
 // biner, görüntü daha temiz görünür. Yüksek tutulursa (75) ODM ortomozaik için
@@ -25,6 +28,10 @@ const DEFAULT_OVERLAP   = 65; // backend'in fotogrametri-uyumlu varsayılanıyla
 const DEFAULT_FRONT_OVERLAP = 20;
 const DEFAULT_SPEED     = 8;
 const MAX_ALTITUDE      = 50;
+
+function defaultAltitudeFor(droneId) {
+  return Math.min(DEFAULT_ALTITUDE + DRONE_ALTITUDE_STEP * (droneIndex(droneId) - 1), MAX_ALTITUDE);
+}
 
 // ─── Step badge ────────────────────────────────────────────────────────────────
 function Step({ n, label, done, active }) {
@@ -51,8 +58,9 @@ function Step({ n, label, done, active }) {
 }
 
 // ─── Altitude confirm modal ────────────────────────────────────────────────────
-function AltitudeModal({ mission, speedMs, onConfirm, onCancel }) {
+function AltitudeModal({ mission, speedMs, droneId, otherMissions, onConfirm, onCancel }) {
   const [alt, setAlt] = useState(Math.min(mission?.altitudePlanned ?? DEFAULT_ALTITUDE, MAX_ALTITUDE));
+  const tooClose = otherMissions.filter(o => Math.abs(o.altitude - alt) < MIN_ALTITUDE_SEPARATION);
 
   const distKm     = mission ? (mission.totalDistanceM / 1000).toFixed(2) : '—';
   const etaMin     = mission ? Math.round(mission.totalDistanceM / Number(speedMs) / 60) : '—';
@@ -77,7 +85,7 @@ function AltitudeModal({ mission, speedMs, onConfirm, onCancel }) {
               ADIM 4 — İRTİFA SEÇ & GÖREVI GÖNDER
             </div>
             <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
-              {mission?.areaName ?? '—'} · {mission?.waypointCount} waypoint · {distKm} km · ~{etaMin} dk
+              <strong style={{ color: droneColor(droneId) }}>{droneLabel(droneId)}</strong> · {mission?.areaName ?? '—'} · {mission?.waypointCount} waypoint · {distKm} km · ~{etaMin} dk
             </div>
           </div>
         </div>
@@ -125,6 +133,18 @@ function AltitudeModal({ mission, speedMs, onConfirm, onCancel }) {
           }}>
             <i className="fas fa-exclamation-triangle me-2"></i>
             Maksimum irtifa — mevzuat sınırı 50 m.
+          </div>
+        )}
+
+        {tooClose.length > 0 && (
+          <div style={{
+            background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)',
+            borderRadius: 8, padding: '8px 12px', marginBottom: 16,
+            fontSize: '0.75rem', color: '#fca5a5'
+          }}>
+            <i className="fas fa-exclamation-triangle me-2"></i>
+            {tooClose.map(o => `${droneLabel(o.droneId)} ${o.altitude} m`).join(', ')} irtifasında görevde —
+            aradaki fark {MIN_ALTITUDE_SEPARATION} m'den az. Farklı bir irtifa seçin.
           </div>
         )}
 
@@ -181,11 +201,11 @@ function StatusBanner({ status }) {
 // ─── Main ──────────────────────────────────────────────────────────────────────
 export function MissionPlanner() {
   const { selectedAreaId, drawOrder, setScanRoute } = useMap();
-  const { socket, isConnected, droneStatus } = useSocket();
+  const { socket, isConnected, droneStatus, selectedDroneId, drones } = useSocket();
   const { dronePosition } = useTelemetry();
 
   const [areaId,         setAreaId]         = useState('');
-  const [altitudeM,      setAltitudeM]      = useState(DEFAULT_ALTITUDE);
+  const [altitudeM,      setAltitudeM]      = useState(() => defaultAltitudeFor(selectedDroneId));
   const [overlapPercent, setOverlapPercent] = useState(DEFAULT_OVERLAP);
   const [frontOverlapPercent, setFrontOverlapPercent] = useState(DEFAULT_FRONT_OVERLAP);
   const [speedMs,        setSpeedMs]        = useState(DEFAULT_SPEED);
@@ -195,6 +215,24 @@ export function MissionPlanner() {
   const [showAltModal,   setShowAltModal]   = useState(false);
   const [missionStatus,  setMissionStatus]  = useState(null);
   const [currentWpIdx,   setCurrentWpIdx]   = useState(0);
+  // Drone the running/last mission was sent to — progress events and the stop
+  // button follow it even if the operator selects another drone meanwhile.
+  const [missionDroneId, setMissionDroneId] = useState(null);
+
+  // New target drone → its default planning altitude
+  useEffect(() => {
+    if (selectedDroneId) setAltitudeM(defaultAltitudeFor(selectedDroneId));
+  }, [selectedDroneId]);
+
+  // The backend knows which drones are on a mission (drones_state.rthHeight),
+  // so the stop button works for the selected drone even if its mission was
+  // started before another drone's.
+  const selectedOnMission = drones.some(d => d.droneId === selectedDroneId && d.rthHeight != null);
+
+  // Other drones' active missions, for the altitude separation warning
+  const otherMissions = drones
+    .filter(d => d.droneId !== selectedDroneId && d.missionAltitude != null)
+    .map(d => ({ droneId: d.droneId, altitude: d.missionAltitude }));
 
   const effectiveAreaId  = areaId || selectedAreaId || '';
   const droneConnected   = isConnected && droneStatus === 'active';
@@ -211,22 +249,29 @@ export function MissionPlanner() {
   useEffect(() => {
     if (!socket) return;
 
+    // Events from a drone other than the one this planner's mission went to are ignored
+    const isMine = (data) => !data?.droneId || !missionDroneId || data.droneId === missionDroneId;
+
     const onProgress = (data) => {
+      if (!isMine(data)) return;
       setMissionStatus('running');
       if (data?.currentWaypointIndex !== undefined) setCurrentWpIdx(data.currentWaypointIndex);
     };
-    const onComplete = () => {
+    const onComplete = (data) => {
+      if (!isMine(data)) return;
       setMissionStatus('complete');
       setStatus({ type: 'success', msg: '✅ Drone tarama görevini tamamladı ve eve döndü.' });
     };
-    const onStopped = () => {
+    const onStopped = (data) => {
+      if (!isMine(data)) return;
       setMissionStatus('stopped');
       setStatus({ type: 'warning', msg: '⚠️ Görev durduruldu.' });
     };
     // Android, waypoint_mission'ı kabul etmezse (örn. 500m güvenlik kilidi)
     // bunu command_response ile bildirir — mission_progress hiç gelmez.
     const onCommandResponse = (data) => {
-      if (data?.command !== 'waypoint_mission' || data?.status !== 'failed') return;
+      if (data?.command !== 'waypoint_mission' || !isMine(data)) return;
+      if (data?.status !== 'failed' && data?.status !== 'rejected') return;
       setMissionStatus(null);
       setStatus({ type: 'error', msg: `❌ Görev reddedildi: ${data.error || 'bilinmeyen hata'}` });
     };
@@ -241,7 +286,7 @@ export function MissionPlanner() {
       socket.off(SOCKET_EVENTS.MISSION_STOPPED,  onStopped);
       socket.off(SOCKET_EVENTS.COMMAND_RESPONSE, onCommandResponse);
     };
-  }, [socket]);
+  }, [socket, missionDroneId]);
 
   // ── Plan route ────────────────────────────────────────────────────────────────
   const handlePlan = async () => {
@@ -263,7 +308,8 @@ export function MissionPlanner() {
         altitudeM: clampedAlt, overlapPercent: Number(overlapPercent),
         frontOverlapPercent: Number(frontOverlapPercent), speedMs: Number(speedMs),
         homeLat: dronePosition?.lat ?? undefined,
-        homeLon: dronePosition?.lon ?? undefined
+        homeLon: dronePosition?.lon ?? undefined,
+        droneId: selectedDroneId ?? undefined
       });
       setPlannedMission({ ...result, altitudePlanned: clampedAlt });
       setScanRoute(result.waypoints);
@@ -304,6 +350,7 @@ export function MissionPlanner() {
 
     try {
       const res = await MissionService.startMission({
+        droneId:      selectedDroneId ?? undefined,
         waypoints:    plannedMission.waypoints,
         areaId:       plannedMission.areaId,
         areaName:     plannedMission.areaName,
@@ -311,9 +358,13 @@ export function MissionPlanner() {
         speedMs:      Number(speedMs),
         savedRouteId: plannedMission.savedRouteId
       });
+      setMissionDroneId(res.droneId ?? selectedDroneId);
       setMissionStatus('running');
       setCurrentWpIdx(0);
-      setStatus({ type: 'success', msg: `🚁 ${res.message}` });
+      const rth = res.rthHeight != null ? ` · RTH irtifası ${res.rthHeight} m` : '';
+      setStatus(res.warning
+        ? { type: 'warning', msg: `🚁 ${res.message}${rth}. ⚠️ ${res.warning}` }
+        : { type: 'success', msg: `🚁 ${res.message}${rth}` });
     } catch (err) {
       setStatus({ type: 'error', msg: `Görev gönderilemedi: ${err.message}` });
     } finally {
@@ -322,10 +373,11 @@ export function MissionPlanner() {
   };
 
   const handleStop = async () => {
-    if (!window.confirm('Drone görevi durdurulsun ve eve dönsün mü?')) return;
+    const target = selectedDroneId ?? missionDroneId;
+    if (!window.confirm(`${droneLabel(target)} görevi durdurulsun ve eve dönsün mü?`)) return;
     try {
-      await MissionService.stopMission();
-      setMissionStatus('stopped');
+      await MissionService.stopMission(target);
+      if (target === missionDroneId) setMissionStatus('stopped');
       setStatus({ type: 'warning', msg: 'Durdurma komutu gönderildi.' });
     } catch (err) {
       setStatus({ type: 'error', msg: `Durdurma hatası: ${err.message}` });
@@ -339,7 +391,7 @@ export function MissionPlanner() {
 
   const canPlan  = !!effectiveAreaId && !loading;
   const canStart = !!plannedMission && isConnected && !loading && missionStatus !== 'running';
-  const canStop  = missionStatus === 'running' && isConnected;
+  const canStop  = isConnected && (selectedOnMission || (missionStatus === 'running' && missionDroneId === selectedDroneId));
   const stripPrev = (2 * Number(altitudeM) * Math.tan(82.1 / 2 * Math.PI / 180) * (1 - Number(overlapPercent) / 100)).toFixed(0);
 
   return (
@@ -348,6 +400,8 @@ export function MissionPlanner() {
         <AltitudeModal
           mission={plannedMission}
           speedMs={speedMs}
+          droneId={selectedDroneId}
+          otherMissions={otherMissions}
           onConfirm={handleModalConfirm}
           onCancel={() => setShowAltModal(false)}
         />
@@ -371,8 +425,16 @@ export function MissionPlanner() {
               <div style={{ color: '#334155', fontSize: '1rem' }}>→</div>
               <Step n={4} label="İrtifa Seç & Gönder" done={step4Done} active={activeStep === 4} />
 
-              {/* Drone connection badge */}
-              <div style={{ marginLeft: 'auto' }}>
+              {/* Target drone + connection badge */}
+              <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+                {selectedDroneId && (
+                  <span style={{
+                    padding: '4px 12px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 700,
+                    border: `1px solid ${droneColor(selectedDroneId)}`, color: droneColor(selectedDroneId)
+                  }}>
+                    Hedef: {droneLabel(selectedDroneId)}
+                  </span>
+                )}
                 <span style={{
                   padding: '4px 12px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 700,
                   background: droneConnected ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
@@ -508,12 +570,12 @@ export function MissionPlanner() {
                 onClick={() => setShowAltModal(true)}
                 disabled={!canStart}
               >
-                <i className="fas fa-paper-plane me-2"></i>Adım 4 — Görevi Drone'a Gönder
+                <i className="fas fa-paper-plane me-2"></i>Adım 4 — Görevi Gönder{selectedDroneId ? ` (${droneLabel(selectedDroneId)})` : ''}
               </button>
 
               {canStop && (
                 <button className="btn btn-danger" onClick={handleStop}>
-                  <i className="fas fa-stop me-2"></i>Görevi Durdur (RTH)
+                  <i className="fas fa-stop me-2"></i>Görevi Durdur (RTH){selectedDroneId ? ` — ${droneLabel(selectedDroneId)}` : ''}
                 </button>
               )}
 
@@ -534,7 +596,7 @@ export function MissionPlanner() {
             {missionStatus === 'running' && plannedMission && (
               <div className="mb-3">
                 <div className="d-flex justify-content-between mb-1">
-                  <small className="text-muted">Görev ilerleme</small>
+                  <small className="text-muted">Görev ilerleme{missionDroneId ? ` — ${droneLabel(missionDroneId)}` : ''}</small>
                   <small className="fw-bold">WP {currentWpIdx + 1} / {plannedMission.waypointCount}</small>
                 </div>
                 <div className="progress" style={{ height: '10px' }}>

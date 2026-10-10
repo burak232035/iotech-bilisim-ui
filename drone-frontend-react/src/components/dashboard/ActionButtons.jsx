@@ -6,10 +6,11 @@
 import { useState } from 'react';
 import { ManualControlPanel } from '@components/dashboard/ManualControlPanel';
 import { useSocket } from '@contexts/SocketContext';
+import { droneLabel } from '@utils/constants';
 
 export function ActionButtons() {
   const [manualOpen, setManualOpen] = useState(false);
-  const { sendCommand, isConnected } = useSocket();
+  const { sendCommand, isConnected, selectedDroneId } = useSocket();
 
   const handleExploration = () => {
     alert('Alan keşfi başlatıldı (demo).');
@@ -20,6 +21,8 @@ export function ActionButtons() {
   };
 
   const handleReturnToStation = () => {
+    const target = selectedDroneId ? droneLabel(selectedDroneId) : 'Drone';
+    if (!window.confirm(`${target} istasyona (eve) dönsün mü?`)) return;
     sendCommand('returnHome', {});
   };
 
@@ -64,7 +67,7 @@ export function ActionButtons() {
           >
             <div className="card-body action-card-body">
               <i className="fas fa-home"></i>
-              <span>İstasyona Dön</span>
+              <span>İstasyona Dön{selectedDroneId ? ` (${droneLabel(selectedDroneId)})` : ''}</span>
             </div>
           </button>
         </div>

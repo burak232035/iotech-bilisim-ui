@@ -113,3 +113,46 @@ export const STORAGE_KEYS = {
   USER: 'akilliKampusUser',
   REMEMBER_ME: 'akilliKampusRememberMe'
 };
+
+// ── Multi-drone (MULTI_DRONE_PROTOCOL.md) ─────────────────────────────────────
+
+// Marker / chip colour per drone; further drones cycle through the palette.
+const DRONE_PALETTE = ['#22c55e', '#3b82f6', '#f59e0b', '#ec4899', '#14b8a6'];
+
+export function droneIndex(droneId) {
+  const m = /^drone-(\d+)$/.exec(droneId || '');
+  return m ? Math.max(1, Number(m[1])) : 1;
+}
+
+export function droneColor(droneId) {
+  return DRONE_PALETTE[(droneIndex(droneId) - 1) % DRONE_PALETTE.length];
+}
+
+export function droneLabel(droneId) {
+  const m = /^drone-(\d+)$/.exec(droneId || '');
+  return m ? `Drone ${m[1]}` : (droneId || 'Drone');
+}
+
+// Commands the backend accepts with droneId "all". "hover" is left out until
+// Android makes it stop a running waypoint mission (§3.3).
+export const ALL_DRONE_COMMANDS = ['emergency_land', 'returnHome', 'stop_mission'];
+
+// DJI flight mode enum names → Turkish labels (unknown values are shown raw)
+export const FLIGHT_MODE_LABELS = {
+  GPS_NORMAL:     'Normal (GPS)',
+  GPS_SPORT:      'Spor',
+  GPS_TRIPOD:     'Sinematik',
+  ATTI:           'ATTI (GPS yok)',
+  WAYPOINT:       'Waypoint görevi',
+  GO_HOME:        'Eve dönüyor',
+  AUTO_LANDING:   'İniş yapıyor',
+  AUTO_TAKE_OFF:  'Kalkış yapıyor',
+  VIRTUAL_STICK:  'Sanal çubuk',
+  MOTOR_START:    'Motorlar çalışıyor',
+  MANUAL:         'Manuel'
+};
+
+export function flightModeLabel(mode) {
+  if (!mode) return null;
+  return FLIGHT_MODE_LABELS[mode] || mode;
+}

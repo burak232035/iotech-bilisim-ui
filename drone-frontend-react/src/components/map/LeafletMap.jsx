@@ -10,7 +10,10 @@ import 'leaflet-imageoverlay-rotated';
 import { useMap } from '@contexts/MapContext';
 import { useSocket } from '@contexts/SocketContext';
 import { ApiService } from '@services/api.service';
-import { MAP_CONFIG, AREA_COLORS, WASTE_CATEGORY_COLORS } from '@utils/constants';
+import {
+  MAP_CONFIG, AREA_COLORS, WASTE_CATEGORY_COLORS,
+  droneColor, droneLabel, flightModeLabel
+} from '@utils/constants';
 import {
   geojsonFeatureToDbPolygon,
   dbPolygonToGeojsonFeature
@@ -68,6 +71,58 @@ function calcRotatedPhotoCorners(lat, lon, altitudeM, headingDeg) {
   return { topLeft, topRight, bottomLeft };
 }
 
+// Drone marker: coloured disc per drone, with a heading arrow once telemetry
+// carries `heading` (protocol v2). The selected drone gets a thicker ring.
+function droneIcon(droneId, heading, selected) {
+  const color = droneColor(droneId);
+  const arrow = typeof heading === 'number'
+    ? `<div style="position:absolute;left:50%;top:50%;width:0;height:0;
+         transform:translate(-50%,-50%) rotate(${heading}deg) translateY(-22px);
+         border-left:6px solid transparent;border-right:6px solid transparent;
+         border-bottom:10px solid ${color};"></div>`
+    : '';
+  return L.divIcon({
+    className: '',
+    html: `<div style="position:relative;width:30px;height:30px;">
+      ${arrow}
+      <div style="
+        width:30px;height:30px;border-radius:50%;
+        background:${color};
+        border:${selected ? 4 : 2}px solid #fff;
+        box-shadow:0 0 ${selected ? 12 : 6}px ${color};
+        display:flex;align-items:center;justify-content:center;
+        font-size:14px;box-sizing:border-box;">🚁</div>
+      <div style="position:absolute;top:31px;left:50%;transform:translateX(-50%);
+        white-space:nowrap;font-size:11px;font-weight:700;color:#fff;
+        background:${color};border-radius:4px;padding:0 4px;">${escapeHtml(droneLabel(droneId))}</div>
+    </div>`,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15]
+  });
+}
+
+function homeIcon(droneId) {
+  const color = droneColor(droneId);
+  return L.divIcon({
+    className: '',
+    html: `<div style="width:20px;height:20px;border-radius:4px;background:#fff;
+      border:2px solid ${color};color:${color};font-weight:800;font-size:12px;
+      display:flex;align-items:center;justify-content:center;box-sizing:border-box;">H</div>`,
+    iconSize: [20, 20],
+    iconAnchor: [10, 10]
+  });
+}
+
+function dronePopup(droneId, data) {
+  const lines = [`<strong>${escapeHtml(droneLabel(droneId))}</strong>`];
+  if (typeof data?.battery === 'number') lines.push(`Batarya: %${Math.round(data.battery)}`);
+  if (typeof data?.altitude?.agl === 'number') lines.push(`Yükseklik: ${data.altitude.agl.toFixed(1)} m`);
+  if (typeof data?.speed === 'number') lines.push(`Hız: ${data.speed.toFixed(1)} m/s`);
+  const mode = flightModeLabel(data?.flightMode);
+  if (mode) lines.push(`Mod: ${escapeHtml(mode)}`);
+  return lines.join('<br/>');
+}
+
 export function LeafletMap() {
   const mapRef         = useRef(null);
   const mapInstanceRef = useRef(null);
@@ -76,7 +131,8 @@ export function LeafletMap() {
   const wasteLayerRef  = useRef(null);
   const orthomosaicLayerRef = useRef(null);
   const photoLayersRef = useRef([]);   // array of L.imageOverlay instances
-  const droneMarkerRef = useRef(null); // live drone position marker
+  const droneMarkersRef = useRef(new Map()); // droneId -> { marker, heading }
+  const homeMarkersRef  = useRef(new Map()); // droneId -> home ("H") marker
   const hasCenteredOnDroneRef = useRef(false); // pan to drone only on its first live fix
 
   const {
@@ -93,7 +149,7 @@ export function LeafletMap() {
     orthomosaicLayer
   } = useMap();
 
-  const { socket } = useSocket();
+  const { socket, selectedDroneId } = useSocket();
 
   // ── Map initialisation ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -110,24 +166,7 @@ export function LeafletMap() {
       attribution: '&copy; OpenStreetMap contributors'
     }).addTo(mapInstance);
 
-    // Drone marker (updated via telemetry)
-    const droneIcon = L.divIcon({
-      className: '',
-      html: `<div style="
-        width:28px; height:28px;
-        background:radial-gradient(circle,#22c55e,#166534);
-        border:2px solid #fff;
-        border-radius:50%;
-        box-shadow:0 0 8px rgba(34,197,94,0.8);
-        display:flex; align-items:center; justify-content:center;
-        font-size:14px;
-      ">🚁</div>`,
-      iconSize: [28, 28],
-      iconAnchor: [14, 14]
-    });
-    droneMarkerRef.current = L.marker(MAP_CONFIG.CENTER, { icon: droneIcon })
-      .addTo(mapInstance)
-      .bindPopup('Drone Konumu');
+    // Drone markers are created per droneId on their first GPS fix (see below)
 
     const drawnItemsLayer = new L.FeatureGroup();
     mapInstance.addLayer(drawnItemsLayer);
@@ -383,19 +422,60 @@ export function LeafletMap() {
     photoLayersRef.current = [];
   }, [clearPhotosFlag]);
 
-  // ── Update drone marker position from telemetry and/or photos ───────────────
+  // ── Update drone markers (one per droneId) from telemetry and/or photos ─────
+  const selectedDroneRef = useRef(selectedDroneId);
+  useEffect(() => {
+    selectedDroneRef.current = selectedDroneId;
+    droneMarkersRef.current.forEach((entry, droneId) => {
+      entry.marker.setIcon(droneIcon(droneId, entry.heading, droneId === selectedDroneId));
+      entry.marker.setZIndexOffset(droneId === selectedDroneId ? 1000 : 0);
+    });
+  }, [selectedDroneId]);
+
   useEffect(() => {
     if (!socket) return;
     const moveMarker = (data) => {
       if (typeof data?.lat !== 'number' || typeof data?.lon !== 'number') return;
-      const marker = droneMarkerRef.current;
-      if (marker) marker.setLatLng([data.lat, data.lon]);
+      const mapInst = mapInstanceRef.current;
+      if (!mapInst) return;
+
+      const droneId = data.droneId || 'drone-1';
+      const selected = droneId === selectedDroneRef.current;
+      let entry = droneMarkersRef.current.get(droneId);
+      if (!entry) {
+        entry = {
+          marker: L.marker([data.lat, data.lon], { icon: droneIcon(droneId, null, selected) })
+            .addTo(mapInst)
+            .bindPopup(dronePopup(droneId, data)),
+          heading: null
+        };
+        droneMarkersRef.current.set(droneId, entry);
+      }
+      entry.marker.setLatLng([data.lat, data.lon]);
+      if (typeof data.heading === 'number' && data.heading !== entry.heading) {
+        entry.heading = data.heading;
+        entry.marker.setIcon(droneIcon(droneId, entry.heading, selected));
+      }
+      if (typeof data.battery === 'number') entry.marker.setPopupContent(dronePopup(droneId, data));
+
+      // Takeoff point (protocol v2 telemetry)
+      if (typeof data.home?.lat === 'number' && typeof data.home?.lon === 'number') {
+        let home = homeMarkersRef.current.get(droneId);
+        if (!home) {
+          home = L.marker([data.home.lat, data.home.lon], { icon: homeIcon(droneId) })
+            .addTo(mapInst)
+            .bindPopup(`${escapeHtml(droneLabel(droneId))} — kalkış noktası`);
+          homeMarkersRef.current.set(droneId, home);
+        } else {
+          home.setLatLng([data.home.lat, data.home.lon]);
+        }
+      }
 
       // First live fix: pan the map to the drone so it isn't lost off-screen
       // if the drone's real position is far from the default campus view.
-      if (!hasCenteredOnDroneRef.current && mapInstanceRef.current) {
+      if (!hasCenteredOnDroneRef.current) {
         hasCenteredOnDroneRef.current = true;
-        mapInstanceRef.current.panTo([data.lat, data.lon]);
+        mapInst.panTo([data.lat, data.lon]);
       }
     };
     socket.on('drone_telemetry', moveMarker);
