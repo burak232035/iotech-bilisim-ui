@@ -61,9 +61,10 @@ class OrthomosaicServiceClass {
       onProgress?.(job.status);
 
       if (job.status === 'done') {
-        // job.file_path is an absolute filesystem path (backend/uploads/orthomosaics/{id}.png) —
-        // the actual served URL is via the /uploads static route, cache-busted per job.
-        return { url: `${API_BASE_URL}/uploads/orthomosaics/${orthomosaicId}.png`, bounds: job.bounds };
+        // job.file_path is an absolute filesystem path (backend/uploads/orthomosaics/<name>.png;
+        // the test instance prefixes the name) — served via the /uploads static route.
+        const fileName = (job.file_path || '').split(/[\\/]/).pop() || `${orthomosaicId}.png`;
+        return { url: `${API_BASE_URL}/uploads/orthomosaics/${fileName}`, bounds: job.bounds };
       }
       if (job.status === 'error') {
         throw new Error(job.error || 'Ortomozaik oluşturulamadı');

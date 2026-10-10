@@ -9,6 +9,12 @@ const JOBS_ROOT   = path.join(__dirname, "../orthomosaic-jobs");
 const OUTPUT_ROOT = path.join(__dirname, "../uploads/orthomosaics");
 const ODM_IMAGE    = process.env.ODM_DOCKER_IMAGE || "opendronemap/odm";
 
+// The test instance (npm run start:test) shares these folders with the live
+// one, and both number orthomosaics from 1 — prefix non-default databases so
+// a test job never overwrites a live result.
+const DB_NAME = process.env.DB_NAME || "drone_tracking";
+const FILE_PREFIX = DB_NAME === "drone_tracking" ? "" : `${DB_NAME}_`;
+
 /**
  * OrthomosaicService
  *
@@ -37,7 +43,7 @@ class OrthomosaicService {
    * @param {number} sessionId
    */
   static async generate(orthomosaicId, sessionId) {
-    const jobDir     = path.join(JOBS_ROOT, String(orthomosaicId));
+    const jobDir     = path.join(JOBS_ROOT, `${FILE_PREFIX}${orthomosaicId}`);
     const projectDir = path.join(jobDir, "project");
     const imagesDir   = path.join(projectDir, "images");
 
@@ -46,6 +52,9 @@ class OrthomosaicService {
       if (photos.length < 3) {
         throw new Error(`Ortomozaik için en az 3 fotoğraf gerekli, ${photos.length} bulundu`);
       }
+
+      // Fail fast with a clear message instead of ODM's generic exit code
+      await this._checkDocker();
 
       fs.mkdirSync(imagesDir, { recursive: true });
 
@@ -76,7 +85,7 @@ class OrthomosaicService {
       const { pngPath, bounds } = await this._convertToPng(jobDir, tifPath);
 
       fs.mkdirSync(OUTPUT_ROOT, { recursive: true });
-      const finalPngPath = path.join(OUTPUT_ROOT, `${orthomosaicId}.png`);
+      const finalPngPath = path.join(OUTPUT_ROOT, `${FILE_PREFIX}${orthomosaicId}.png`);
       fs.copyFileSync(pngPath, finalPngPath);
 
       await OrthomosaicModel.markDone(orthomosaicId, { filePath: finalPngPath, bounds });
@@ -89,6 +98,21 @@ class OrthomosaicService {
       // regardless of success/failure, the result PNG was already copied out.
       fs.rm(jobDir, { recursive: true, force: true }, () => {});
     }
+  }
+
+  /** Reject with a readable message when Docker Desktop isn't running. */
+  static _checkDocker() {
+    return new Promise((resolve, reject) => {
+      const proc = spawn("docker", ["info", "--format", "{{.ServerVersion}}"]);
+      let err = "";
+      proc.stderr.on("data", (d) => { err += d; });
+      proc.on("error", () => reject(new Error("Docker bulunamadı — Docker Desktop kurulu ve açık olmalı")));
+      proc.on("close", (code) => {
+        if (code === 0) return resolve();
+        console.error(`[docker] ${err.trim()}`);
+        reject(new Error("Docker Desktop çalışmıyor — Docker Desktop'ı açıp motorun başlamasını bekleyin, sonra tekrar deneyin"));
+      });
+    });
   }
 
   /** Run the ODM pipeline in fast-orthophoto mode. Resolves on success, rejects on failure. */
@@ -106,13 +130,19 @@ class OrthomosaicService {
       ];
 
       const proc = spawn("docker", args);
-      proc.stdout.on("data", (d) => process.stdout.write(`[odm] ${d}`));
-      proc.stderr.on("data", (d) => process.stderr.write(`[odm] ${d}`));
+      // Keep the output tail so a failure can say *why* (ODM prints its
+      // error as one of the last lines), not just the exit code.
+      let tail = "";
+      const keep = (d) => { tail = (tail + d).slice(-4000); };
+      proc.stdout.on("data", (d) => { keep(d); process.stdout.write(`[odm] ${d}`); });
+      proc.stderr.on("data", (d) => { keep(d); process.stderr.write(`[odm] ${d}`); });
 
       proc.on("error", (err) => reject(new Error(`docker çalıştırılamadı: ${err.message} (Docker Desktop açık mı?)`)));
       proc.on("close", (code) => {
-        if (code === 0) resolve();
-        else reject(new Error(`ODM işlemi ${code} koduyla başarısız oldu`));
+        if (code === 0) return resolve();
+        const lines = tail.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        const reason = [...lines].reverse().find(l => /error|exception|not enough|failed/i.test(l)) || lines[lines.length - 1];
+        reject(new Error(`ODM işlemi ${code} koduyla başarısız oldu${reason ? `: ${reason.slice(0, 300)}` : ""}`));
       });
     });
   }
