@@ -51,3 +51,5 @@ green-concrete-service/__pycache__/
 
 # Stray Windows artifact
 nul
+
+orthomosaic-service/__pycache__/
