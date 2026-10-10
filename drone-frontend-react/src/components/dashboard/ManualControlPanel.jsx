@@ -169,15 +169,24 @@ export function ManualControlPanel({ onClose }) {
     setTimeout(() => setStatusMsg(null), 3500);
   };
 
-  // Virtual stick gönderim döngüsü (10 Hz)
+  // Virtual stick gönderim döngüsü (10 Hz) — yalnızca çubuklardan biri
+  // hareketliyken gönderir; bırakılınca tek bir sıfır paketi yollayıp susar.
+  // Boştayken sürekli sıfır göndermek Android'de joystick modunu açık tutuyor,
+  // görev başlangıcını ve acil inişi etkiliyordu.
+  const stickActiveRef = useRef(false);
   useEffect(() => {
     const iv = setInterval(() => {
       const ls = leftRef.current;
       const rs = rightRef.current;
-      sendRef.current('virtual_stick', {
+      const payload = {
         leftStick:  { x: r2(ls.x), y: r2(ls.y) },
         rightStick: { x: r2(rs.x), y: r2(rs.y) }
-      });
+      };
+      const moving = [payload.leftStick.x, payload.leftStick.y, payload.rightStick.x, payload.rightStick.y]
+        .some(v => v !== 0);
+      if (!moving && !stickActiveRef.current) return;
+      stickActiveRef.current = moving;
+      sendRef.current('virtual_stick', payload);
     }, STICK_MS);
     return () => clearInterval(iv);
   }, []); // sadece mount/unmount

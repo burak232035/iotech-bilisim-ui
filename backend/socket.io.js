@@ -74,7 +74,7 @@ function getOrCreateDrone(droneId) {
       lastPosition:      null,   // { lat, lon, updatedAt }
       connectedAt:       null,
       disconnectedAt:    null,
-      missionCompleteAt: null,
+      missionEndedAt:    null,   // mission_complete or mission_stopped received
       landedSince:       null
     };
     drones.set(droneId, entry);
@@ -141,7 +141,7 @@ async function endDroneSession(entry, reason) {
   entry.session = null;
   entry.activeAreaId = null;
   entry.activeMission = null;
-  entry.missionCompleteAt = null;
+  entry.missionEndedAt = null;
   entry.landedSince = null;
   try {
     await FlightSessionModel.endSession(sessionId);
@@ -297,13 +297,35 @@ function sendToDrone(entry, event, payload) {
 }
 
 /**
+ * Start a fresh session for a drone that is still connected after its last
+ * session closed (landing after a mission), and tell the drone about it.
+ */
+async function openNewSession(entry, reason) {
+  return withLock(entry.droneId, async () => {
+    if (entry.session) return;
+    try {
+      await ensureSession(entry, null);
+      console.log(`🆕 New session for ${entry.droneId} (${reason})`);
+      io.to(droneRoom(entry.droneId)).emit("session_started", sessionStartedPayload(entry));
+      emitToWeb("session_info", { ...entry.session, droneId: entry.droneId });
+      broadcastDronesState();
+    } catch (err) {
+      console.error("❌ Error opening session:", err.message);
+    }
+  });
+}
+
+/**
  * Called by the mission route right before waypoint_mission: records the area
  * and mission, then re-sends session_started carrying the areaId.
  */
 async function prepareMissionStart(entry, { areaId, maxAltitude, rthHeight }) {
+  // Previous session may have closed after landing while the drone stayed connected
+  if (!entry.session) await openNewSession(entry, "mission");
+
   entry.activeAreaId      = areaId ?? null;
   entry.activeMission     = { maxAltitude, rthHeight, startedAt: Date.now() };
-  entry.missionCompleteAt = null;
+  entry.missionEndedAt    = null;
   entry.landedSince       = null;
 
   if (!entry.session) return;
@@ -335,7 +357,7 @@ function stampDroneId(socket, data, eventName) {
 }
 
 function checkLanded(entry, data) {
-  if (!entry.missionCompleteAt || !entry.session) return;
+  if (!entry.missionEndedAt || !entry.session) return;
   const flying = typeof data?.isFlying === "boolean"
     ? data.isFlying
     : (typeof data?.altitude?.agl === "number" ? data.altitude.agl > LANDED_AGL_THRESHOLD_M : null);
@@ -414,8 +436,9 @@ function initializeSocketIO(httpServer) {
       if (!entry) return;
 
       if (!entry.session) {
-        console.warn(`⚠️  Telemetry received from ${droneId} but no active session`);
-        return;
+        // Session closed after the last landing; a new flight opens a new one
+        if (data?.isFlying === true) await openNewSession(entry, "takeoff");
+        if (!entry.session) return;
       }
 
       const stamped = stampDroneId(socket, data, "drone_telemetry");
@@ -502,7 +525,7 @@ function initializeSocketIO(httpServer) {
       console.log(`✅ Mission complete from ${stamped.droneId || socket.id}`);
       const entry = drones.get(stamped.droneId);
       if (entry) {
-        entry.missionCompleteAt = Date.now();
+        entry.missionEndedAt = Date.now();
         entry.landedSince = null;
       }
       emitToWeb("mission_complete", stamped);
@@ -513,7 +536,12 @@ function initializeSocketIO(httpServer) {
       const stamped = stampDroneId(socket, data, "mission_stopped");
       console.log(`🛑 Mission stopped from ${stamped.droneId || socket.id}`);
       const entry = drones.get(stamped.droneId);
-      if (entry) entry.activeMission = null;
+      if (entry) {
+        // A stopped mission ends the flight too: close the session once landed
+        entry.activeMission = null;
+        entry.missionEndedAt = Date.now();
+        entry.landedSince = null;
+      }
       emitToWeb("mission_stopped", stamped);
       broadcastDronesState();
     });

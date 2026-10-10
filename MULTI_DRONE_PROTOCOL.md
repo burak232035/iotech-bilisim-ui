@@ -193,16 +193,34 @@ bağlantı kopsa da drone üzerinde devam ettiği için bu gereklidir.
 
 ### 4.4 Oturumun kapanması
 
-Oturum bağlantı koptuğu anda **kapanmaz.** Kapanma koşulları, öncelik sırasıyla:
+Oturum bağlantı koptuğu anda **kapanmaz.** Görevin bittiği, `mission_complete`
+**veya** `mission_stopped` (ör. `stop_mission`, `emergency_land`) ile bildirilir.
+Kapanma koşulları, öncelik sırasıyla:
 
-1. `isFlying` varsa: `mission_complete` gönderildikten sonra `isFlying`
-   `true` → `false` olur ve 60 sn boyunca `false` kalır.
-2. `isFlying` yoksa (v1 istemci): `mission_complete` gönderildikten sonra
-   `altitude.agl` 60 sn boyunca 1,5 m'nin altında kalır.
+1. `isFlying` varsa: görev bittikten sonra `isFlying` `false` olur ve 60 sn
+   boyunca `false` kalır.
+2. `isFlying` yoksa (v1 istemci): görev bittikten sonra `altitude.agl`
+   60 sn boyunca 1,5 m'nin altında kalır.
 3. Son çare: drone 30 dakika boyunca bağlanmaz.
 
-Fotoğraf yükleme kapalı oturumlara da kabul edilir; iniş sonrası toplu
-yükleme oturum kapanmış olsa bile doğru oturuma gider.
+Fotoğraf yükleme **kapalı oturumlara da kabul edilir**; iniş sonrası toplu
+yükleme (durdurulmuş görevlerde de) oturum kapanmış olsa bile doğru oturuma gider.
+
+`mission_complete` payload'ında Android `detectedBy` alanını gönderir:
+`"FINISHED"` (DJI bildirimi) ya da `"flightMode:WAYPOINT→GO_HOME"` (DJI
+bildirimi gelmediğinde uçuş modu geçişinden algılandı). Backend bu alanı
+olduğu gibi dashboard'a iletir.
+
+### 4.5 Bağlı kalan drone'da yeni oturum
+
+Oturum kapandıktan sonra drone bağlı kalırsa, sıradaki uçuş için backend
+**otomatik yeni oturum açar** ve drone'a yeni `session_started` gönderir:
+- yeni bir `waypoint_mission` gönderilirken, ya da
+- telemetride `isFlying: true` geldiğinde (elle kalkış).
+
+Android iniş sonrası yüklemede, o uçuşun `sessionId`'sini kullanmaya devam
+etmelidir (yeni `session_started` gelse bile, önceki uçuşun fotoğrafları
+önceki oturuma).
 
 ## 5. Android → backend olayları
 
@@ -316,6 +334,10 @@ waypoint listesiyle alır. Eski arayüzün `start_area_scan` komutu kullanılmaz
   uyarıları ekranda gösterilir; "Görevi Durdur" seçili drone'un görevini durdurur.
 - **Elle kontrol paneli:** hedef, panel açıldığı anda sabitlenir; panel
   açıkken başka drone seçilse de joystick komutları ilk drone'a gider.
+  `virtual_stick` **yalnızca çubuk hareket ettirilirken** gönderilir;
+  bırakılınca tek bir sıfır paketi gönderilip akış durur. (Önceden panel
+  açıkken boşta da saniyede 10 kez sıfır gönderiliyordu; bu, Android'de
+  görev başlangıcında ve acil inişte joystick modunu yeniden açıyordu.)
 
 ## 9. Test ortamı
 
