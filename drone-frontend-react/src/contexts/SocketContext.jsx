@@ -73,7 +73,11 @@ export function SocketProvider({ children }) {
       setDrones(list);
       setLastSessionByDrone((prev) => {
         const next = { ...prev };
-        list.forEach((d) => { if (d.sessionId) next[d.droneId] = d.sessionId; });
+        // Open session, else the drone's most recent (closed) one — survives page reloads
+        list.forEach((d) => {
+          const id = d.sessionId ?? d.lastSessionId;
+          if (id) next[d.droneId] = id;
+        });
         return next;
       });
       setEndedDrones((prev) => {

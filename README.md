@@ -20,8 +20,12 @@ ortomozaik harita üreten bir sistem.
   gösterilir.
 - **Yeşil alan / beton analizi (YOLOv8-seg)** — fotoğrafların yüzde kaçının
   bitki örtüsü, yüzde kaçının sert zemin olduğunu hesaplar.
-- **Ortomozaik** — OpenDroneMap ile fotoğraflar tek bir hava görüntüsünde
-  birleştirilir ve haritaya katman olarak eklenir.
+- **Ortomozaik** — fotoğraflar tek bir hava görüntüsünde birleştirilip haritaya
+  katman olarak eklenir. Varsayılan motor Docker'sız bir OpenCV servisidir
+  (GPS ile yerleştirme + görüntü eşleştirmeyle hizalama); istenirse Docker'daki
+  OpenDroneMap kullanılabilir.
+- **Çoklu drone** — birden fazla drone aynı anda bağlanır; komutlar ve görevler
+  seçili drone'a gider (bkz. `MULTI_DRONE_PROTOCOL.md`).
 - **PDF rapor** — uçuş, tespit ve analiz sonuçlarını içeren otomatik rapor.
 
 ## Mimari
@@ -32,10 +36,10 @@ DJI RC (Android köprü uygulaması, DJI MSDK v5)
         ▼
 Backend — Node.js / Express / Socket.IO  (port 3001) ── PostgreSQL (drone_tracking)
         │                     │                    │
-        │ HTTP                │ HTTP               │ Docker
+        │ HTTP                │ HTTP               │ HTTP
         ▼                     ▼                    ▼
-Çöp tespiti servisi    Yeşil/beton servisi    OpenDroneMap
-FastAPI (port 8000)    FastAPI (port 8001)    (opendronemap/odm)
+Çöp tespiti servisi    Yeşil/beton servisi    Ortomozaik servisi (OpenCV)
+FastAPI (port 8000)    FastAPI (port 8001)    FastAPI (port 8002)
         ▲
         │ REST + Socket.IO
 Web Dashboard — React 19 / Vite / Leaflet  (port 3000)
@@ -47,6 +51,7 @@ Web Dashboard — React 19 / Vite / Leaflet  (port 3000)
 | `drone-frontend-react/` | Web dashboard (React + Vite + Leaflet) |
 | `waste-detection-service/` | Çöp tespiti servisi (FastAPI + YOLO) ve Colab eğitim notebook'u |
 | `green-concrete-service/` | Yeşil alan/beton segmentasyon servisi (FastAPI + YOLOv8-seg) ve Colab eğitim notebook'u |
+| `orthomosaic-service/` | Docker'sız ortomozaik servisi (FastAPI + OpenCV) |
 | `frontend/` | Eski düz HTML prototip — **kullanılmıyor** |
 
 Android köprü uygulamasının kodu bu repoda değildir; ona ait spesifikasyonlar
@@ -59,7 +64,7 @@ aşağıdaki dokümanlarda yer alır.
 - Node.js 18+
 - PostgreSQL
 - Python 3.10+ (analiz servisleri için)
-- Docker Desktop (ortomozaik için)
+- Docker Desktop yalnızca `ORTHOMOSAIC_ENGINE=odm` seçilirse gerekir
 
 ### 1. Veritabanı ve backend
 
@@ -118,8 +123,16 @@ Yeşil/beton servisi için aynı adımları `green-concrete-service` klasöründ
 
 ### 4. Ortomozaik
 
-Docker Desktop açık olmalıdır. Backend ilk kullanımda `opendronemap/odm`
-imajını kullanır (`ODM_DOCKER_IMAGE` ile değiştirilebilir).
+Varsayılan motor Docker gerektirmez. Servisi başlatın (Python, OpenCV, FastAPI gerekir):
+
+```bash
+pip install -r orthomosaic-service/requirements.txt
+python -m uvicorn --app-dir orthomosaic-service app:app --host 127.0.0.1 --port 8002
+```
+
+İyi sonuç için görevler **ileri örtüşme %60+** ile uçurulmalı. Gerçek
+fotogrametri isteniyorsa `ORTHOMOSAIC_ENGINE=odm` ile Docker'daki OpenDroneMap
+kullanılır (Docker Desktop açık olmalı).
 
 ### Ortam değişkenleri
 
@@ -128,7 +141,9 @@ imajını kullanır (`ODM_DOCKER_IMAGE` ile değiştirilebilir).
 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | `localhost`, `5432`, `drone_tracking`, `postgres`, `postgres` | PostgreSQL bağlantısı |
 | `WASTE_DETECTION_URL` | `http://127.0.0.1:8000` | Çöp tespiti servisi |
 | `LANDCOVER_SERVICE_URL` | `http://127.0.0.1:8001` | Yeşil/beton servisi |
-| `ODM_DOCKER_IMAGE` | `opendronemap/odm` | Ortomozaik Docker imajı |
+| `ORTHOMOSAIC_ENGINE` | `opencv` | `opencv` (Docker'sız servis) veya `odm` (Docker) |
+| `ORTHOMOSAIC_SERVICE_URL` | `http://127.0.0.1:8002` | Docker'sız ortomozaik servisi |
+| `ODM_DOCKER_IMAGE` | `opendronemap/odm` | `odm` motorunda Docker imajı |
 
 ## API özeti
 

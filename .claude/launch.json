@@ -40,6 +40,22 @@
         "dev:test"
       ],
       "port": 3010
+    },
+    {
+      "name": "orthomosaic-service",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "--app-dir",
+        "orthomosaic-service",
+        "app:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8002"
+      ],
+      "port": 8002
     }
   ]
 }

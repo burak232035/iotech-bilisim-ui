@@ -1,13 +1,12 @@
 /**
  * OrthomosaicPanel
- * Uçuş sonrası yüklenmiş tam-çözünürlük fotoğrafları OpenDroneMap ile
- * gerçek fotogrametrik dikişleme yaparak tek, dikişsiz bir hava
- * görüntüsüne dönüştürür ve haritaya (orthomosaicLayer) basar.
+ * Uçuş sonrası yüklenmiş tam-çözünürlük fotoğrafları tek bir hava
+ * görüntüsünde birleştirir ve haritaya (orthomosaicLayer) basar.
  *
- * Basit GPS+pusula tabanlı yerleştirmeden (drone_photo canlı önizleme,
- * waste tespit marker'ları) farklı olarak, bu gerçek görsel özellik
- * eşleştirmesi kullanır — Google Haritalar kalitesinde sonuç verir ama
- * dakikalar sürebilir (Docker + OpenDroneMap).
+ * Varsayılan motor Docker'sız orthomosaic-service (OpenCV): her foto önce
+ * GPS+pusula ile yerleştirilir, sonra komşularıyla görsel özellik
+ * eşleştirmesiyle hizalanır. ORTHOMOSAIC_ENGINE=odm ile Docker'daki
+ * OpenDroneMap (gerçek fotogrametri) kullanılabilir.
  */
 
 import { useState } from 'react';
@@ -62,7 +61,7 @@ export function OrthomosaicPanel() {
   return (
     <div className="row mt-2">
       <div className="col-12">
-        <Card title="Ortomozaik (Fotogrametrik Dikişleme)" icon="fas fa-layer-group" variant="info">
+        <Card title="Ortomozaik (Fotoğraf Birleştirme)" icon="fas fa-layer-group" variant="info">
           <button
             type="button"
             className="btn btn-info btn-block"
@@ -83,9 +82,9 @@ export function OrthomosaicPanel() {
           )}
 
           <small className="d-block mt-2 text-muted">
-            Google Haritalar tarzı dikişsiz bir sonuç için gerçek fotogrametri
-            (OpenDroneMap) çalıştırır — Docker gerektirir, işlem birkaç dakika
-            sürebilir.
+            Fotoğraflar GPS ile yerleştirilip komşularıyla görüntü eşleştirmesiyle hizalanır
+            (Docker gerekmez). İyi sonuç için görevi <strong>ileri örtüşme %60+</strong> ile uçurun;
+            düşük örtüşmede ardışık fotoğraflar eşleşmez ve yalnızca GPS'e göre yerleşir.
           </small>
 
           {error && (

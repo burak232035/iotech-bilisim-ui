@@ -118,6 +118,19 @@ class FlightSessionModel {
   }
 
   /**
+   * Most recent session id of a drone (any status), or null.
+   * @param {string} droneId
+   * @returns {Promise<number|null>}
+   */
+  static async getLatestIdForDrone(droneId) {
+    const result = await pool.query(
+      `SELECT id FROM flight_sessions WHERE drone_id = $1 ORDER BY start_time DESC LIMIT 1`,
+      [droneId]
+    );
+    return result.rows[0]?.id ?? null;
+  }
+
+  /**
    * Get session by ID
    * @param {number} id
    * @returns {Promise<Object|null>}

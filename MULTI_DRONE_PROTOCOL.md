@@ -211,12 +211,21 @@ yükleme (durdurulmuş görevlerde de) oturum kapanmış olsa bile doğru oturum
 bildirimi gelmediğinde uçuş modu geçişinden algılandı). Backend bu alanı
 olduğu gibi dashboard'a iletir.
 
-### 4.5 Bağlı kalan drone'da yeni oturum
+### 4.5 Uçuşlar arası: yeni oturum
 
 Oturum kapandıktan sonra drone bağlı kalırsa, sıradaki uçuş için backend
 **otomatik yeni oturum açar** ve drone'a yeni `session_started` gönderir:
 - yeni bir `waypoint_mission` gönderilirken, ya da
 - telemetride `isFlying: true` geldiğinde (elle kalkış).
+
+`register` `lastSessionId` taşıyorsa ve o oturum kapanmışsa (ör. iniş sonrası
+uygulama yeniden bağlandı), backend **boş bir oturum açmaz** ve
+`session_started` göndermez; yeni oturum yukarıdaki gibi kalkışta ya da görevde
+açılır. `lastSessionId` olmadan ilk bağlantıda oturum eskisi gibi hemen açılır.
+Oturum yokken telemetri dashboard'a iletilir ama kaydedilmez.
+
+Dashboard'un analiz panelleri (ortomozaik, çöp, yeşil/beton, rapor), açık
+oturum yoksa drone'un **en son oturumunu** kullanır (`drones_state.lastSessionId`).
 
 Android iniş sonrası yüklemede, o uçuşun `sessionId`'sini kullanmaya devam
 etmelidir (yeni `session_started` gelse bile, önceki uçuşun fotoğrafları

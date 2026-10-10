@@ -68,6 +68,7 @@ function getOrCreateDrone(droneId) {
       protocol:          1,
       appVersion:        null,
       session:           null,   // flight_sessions row
+      lastSessionId:     null,   // most recent session (open or closed) — for post-flight analysis
       activeAreaId:      null,
       activeMission:     null,   // { maxAltitude, rthHeight, startedAt }
       lastTelemetry:     null,
@@ -106,6 +107,7 @@ function droneSummary(entry) {
     protocol:    entry.protocol,
     appVersion:  entry.appVersion,
     sessionId:   entry.session ? entry.session.id : null,
+    lastSessionId: entry.session ? entry.session.id : entry.lastSessionId,
     areaId:      entry.activeAreaId,
     rthHeight:   entry.activeMission ? entry.activeMission.rthHeight : null,
     missionAltitude: entry.activeMission ? entry.activeMission.maxAltitude : null,
@@ -138,6 +140,7 @@ function sessionStartedPayload(entry) {
 async function endDroneSession(entry, reason) {
   if (!entry.session) return;
   const sessionId = entry.session.id;
+  entry.lastSessionId = sessionId;
   entry.session = null;
   entry.activeAreaId = null;
   entry.activeMission = null;
@@ -157,7 +160,7 @@ async function endDroneSession(entry, reason) {
  * Give the drone an open session: keep the one in memory, resume lastSessionId
  * if it's still open and belongs to this drone, otherwise start a new one.
  */
-async function ensureSession(entry, lastSessionId) {
+async function ensureSession(entry, lastSessionId, { createIfNone = true } = {}) {
   if (entry.session) return;
 
   if (lastSessionId) {
@@ -175,6 +178,7 @@ async function ensureSession(entry, lastSessionId) {
     }
   }
 
+  if (!createIfNone) return;
   entry.session = await FlightSessionModel.createSession({
     start_time:   new Date(),
     drone_id:     entry.droneId,
@@ -242,7 +246,13 @@ async function handleDroneRegister(socket, data) {
     socket.join(droneRoom(droneId));
 
     try {
-      await ensureSession(entry, data?.lastSessionId);
+      // A reconnect (lastSessionId given) after that session closed doesn't
+      // open an empty one: the next takeoff / mission does (§4.5), and the
+      // drone keeps using its last sessionId for post-landing uploads.
+      await ensureSession(entry, data?.lastSessionId, { createIfNone: !data?.lastSessionId });
+      if (!entry.session && !entry.lastSessionId) {
+        entry.lastSessionId = await FlightSessionModel.getLatestIdForDrone(droneId);
+      }
       if (entry.serial && entry.session && !entry.session.drone_serial) {
         entry.session = (await FlightSessionModel.setDroneSerial(entry.session.id, entry.serial)) || entry.session;
       }
@@ -435,18 +445,15 @@ function initializeSocketIO(httpServer) {
       const entry = droneId && drones.get(droneId);
       if (!entry) return;
 
-      if (!entry.session) {
-        // Session closed after the last landing; a new flight opens a new one
-        if (data?.isFlying === true) await openNewSession(entry, "takeoff");
-        if (!entry.session) return;
-      }
+      // No session between flights (closed after landing); taking off opens one
+      if (!entry.session && data?.isFlying === true) await openNewSession(entry, "takeoff");
 
       const stamped = stampDroneId(socket, data, "drone_telemetry");
       entry.lastTelemetry = stamped;
       updatePosition(entry, data?.lat, data?.lon);
 
-      // Buffer telemetry (non-blocking)
-      TelemetryService.bufferTelemetry(entry.session.id, stamped);
+      // Buffer telemetry (non-blocking) — only flights are recorded
+      if (entry.session) TelemetryService.bufferTelemetry(entry.session.id, stamped);
 
       // Broadcast to web clients (throttled to 1 Hz per client per drone)
       TelemetryService.broadcastTelemetry(io, webClients, stamped);
