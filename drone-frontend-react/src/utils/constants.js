@@ -105,7 +105,8 @@ export const DRONE_COMMANDS = {
   VIRTUAL_STICK:   'virtual_stick',
   GIMBAL_PITCH:    'gimbal_pitch',
   WAYPOINT_MISSION: 'waypoint_mission',
-  STOP_MISSION:    'stop_mission'
+  STOP_MISSION:    'stop_mission',
+  RESUME_MISSION:  'resume_mission'   // continues a mission paused by hover
 };
 
 // Local Storage Keys
@@ -133,9 +134,9 @@ export function droneLabel(droneId) {
   return m ? `Drone ${m[1]}` : (droneId || 'Drone');
 }
 
-// Commands the backend accepts with droneId "all". "hover" is left out until
-// Android makes it stop a running waypoint mission (§3.3).
-export const ALL_DRONE_COMMANDS = ['emergency_land', 'returnHome', 'stop_mission'];
+// Commands the backend accepts with droneId "all" (§3.3). hover pauses a
+// running mission; resume_mission is per-drone only.
+export const ALL_DRONE_COMMANDS = ['emergency_land', 'returnHome', 'hover', 'stop_mission'];
 
 // DJI flight mode enum names → Turkish labels (unknown values are shown raw)
 export const FLIGHT_MODE_LABELS = {

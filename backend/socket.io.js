@@ -25,10 +25,9 @@ const socketToDrone = new Map();
 // aircraft). They get no commands until a register with a serial arrives.
 const pendingSockets = new Map();
 
-// "hover" is left out for now: on Android it doesn't stop a running waypoint
-// mission yet, so an "all → hover" emergency button would be misleading.
-// Re-add once Android fixes it (MULTI_DRONE_PROTOCOL.md §3.3).
-const ALL_TARGET_COMMANDS = new Set(["emergency_land", "returnHome", "stop_mission"]);
+// hover pauses a running waypoint mission on Android (resume_mission continues
+// it). resume_mission itself is deliberately per-drone only. §3.3
+const ALL_TARGET_COMMANDS = new Set(["emergency_land", "returnHome", "hover", "stop_mission"]);
 
 const SESSION_DISCONNECT_TIMEOUT_MS = 30 * 60 * 1000; // end session after 30 min offline
 const LANDED_CONFIRM_MS             = 60 * 1000;      // landed this long after mission_complete
@@ -516,6 +515,7 @@ function initializeSocketIO(httpServer) {
       const entry = drones.get(stamped.droneId);
       if (entry) entry.activeMission = null;
       emitToWeb("mission_stopped", stamped);
+      broadcastDronesState();
     });
 
     // Drone → Web: Post-landing full-resolution upload progress

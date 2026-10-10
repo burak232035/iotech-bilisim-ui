@@ -102,15 +102,23 @@ Web'den `droneId` olmadan bir komut gelirse:
 ### 3.3 "Tüm drone'lar" hedefi
 
 Web `droneId: "all"` gönderebilir, **yalnızca** şu komutlar için:
-`emergency_land`, `returnHome`, `stop_mission`. Diğer komutlarda `"all"`
-reddedilir.
+`emergency_land`, `returnHome`, `hover`, `stop_mission`. Diğer komutlarda
+`"all"` reddedilir.
 
-> **`hover` geçici olarak listeden çıkarıldı.** Android'de `hover` şu an
-> çalışan bir waypoint görevini durdurmuyor, yalnızca manuel joystick
-> modunu kapatıyor. Görev sırasında gelen `emergency_land` davranışı da
-> henüz netleşmedi. Android bunları düzeltene kadar backend `"all" → hover`
-> komutunu reddeder ve dashboard'a "Tümü → hover" butonu eklenmez. Düzeltme
-> gelince `hover` listeye geri alınacak.
+### 3.3.1 Görev sırasında komut davranışı (Android)
+
+| Komut | Görev sürerken | Görev yokken |
+| --- | --- | --- |
+| `hover` | Görevi **duraklatır**, drone havada bekler | Manuel joystick modunu kapatır, drone bekler |
+| `resume_mission` | Duraklatılmış görevi kaldığı yerden sürdürür | `failed` döner |
+| `emergency_land` | Önce görevi durdurur (`mission_stopped`, `reason: "emergency_land"`), sonra iner | Hemen iner |
+
+`resume_mission` yalnızca tek bir drone'a gönderilebilir; `"all"` ile kabul
+edilmez (iki drone'un aynı anda yeniden hareketlenmesi bilinçli bir seçim olmalı).
+
+```json
+{ "command": "resume_mission", "droneId": "drone-2", "timestamp": 1760000000000 }
+```
 
 Backend `"all"` değerini Android'e iletmez; komutu her drone'a **o drone'un
 kendi `droneId`'si ile** ayrı ayrı gönderir. Böylece §3.1'deki eşleşme
@@ -142,6 +150,11 @@ Mevcut format korunur; `droneId` ve iki yeni alan eklenir:
 ```
 
 - `mission.areaId` görev için esas kaynaktır (ayrıca bkz. §4.2).
+- Android önce RTH irtifasını yazıp doğrular, sonra görevi başlatır.
+  Başarılıysa `command_response` `status: "started"` döner; RTH yazılamazsa
+  `status: "failed"` ve hata mesajı döner.
+- `mission.finishAction` ve `mission.headingMode` Android'de okunmaz; görev
+  sonunda drone her zaman eve döner.
 - `mission.rthHeight`: Android bunu görev başlamadan önce drone'a yazar.
   **Çoklu drone görevinde `rthHeight` yoksa Android görevi başlatmamalı ve
   hata dönmelidir** (sabit varsayılan değer kullanılmaz; bkz. §6.2).
@@ -292,7 +305,9 @@ waypoint listesiyle alır. Eski arayüzün `start_area_scan` komutu kullanılmaz
   Seçili drone; komutların, görevlerin ve telemetri kartlarının hedefidir.
   Seçili drone bağlantıyı kaybederse seçim **otomatik değişmez** (komutlar
   sessizce başka drone'a gitmesin diye); komutlar backend'de reddedilir.
-- **"Tümü" butonları:** Acil İniş, Eve Dön, Görevi Durdur (`hover` yok, §3.3).
+- **"Tümü" butonları:** Acil İniş, Duraklat (`hover`), Eve Dön, Görevi Durdur (§3.3).
+- **Görev planlayıcıda Duraklat / Devam Et:** seçili drone görevdeyken
+  `hover` ve `resume_mission` gönderir.
 - **Harita:** her drone kendi renginde, adı, yön oku (`heading`) ve "H"
   kalkış noktası (`home`) ile.
 - **Görev planlayıcı:** görev seçili drone'a gider; varsayılan planlama
@@ -322,9 +337,8 @@ npm --prefix drone-frontend-react run dev:test   # dashboard → http://localhos
 - [x] **Port 5000 YOLO servisi:** Android'deki `DroneFrameSender` canlı FPV
       karelerini `<sunucu-ip>:5000/detect` adresine gönderiyordu; servis bu
       projede yok. Android'de `ENABLE_FRAME_SENDER=false` build ayarıyla kapatıldı.
-- [ ] **Android `hover` / `emergency_land` görev sırasında:** `hover` çalışan
-      görevi durdurmuyor, `emergency_land` davranışı belirsiz; Android düzeltiyor.
-      Düzelince `hover` "all" listesine geri alınacak (§3.3).
+- [x] **Android `hover` / `emergency_land` görev sırasında:** düzeltildi;
+      `hover` görevi duraklatıyor, `resume_mission` eklendi (§3.3.1).
 - [ ] **Tablet v2'ye geçecek** (§6.3).
 - [ ] **Kalkış rakımı eşiği:** iki drone yan yana konup sahada ölçülecek,
       gerçekçi eşik değeri backend'e iletilecek (§6.1).
@@ -343,7 +357,7 @@ npm --prefix drone-frontend-react run dev:test   # dashboard → http://localhos
 - [x] Foto yüklemeye `droneId`
 - [x] Sunucu adresi için build ayarı (canlı / test)
 - [x] Port 5000 gönderimini kapatan build ayarı (`ENABLE_FRAME_SENDER=false`)
-- [ ] `hover`'ın çalışan görevi durdurması; görev sırasında `emergency_land` davranışı (§3.3)
+- [x] `hover`'ın çalışan görevi duraklatması, `resume_mission`, görev sırasında `emergency_land` (§3.3.1)
 - [ ] Tablet (drone-1) sürümünün v2'ye geçmesi (§6.3)
 
 ### Backend
@@ -357,7 +371,7 @@ npm --prefix drone-frontend-react run dev:test   # dashboard → http://localhos
 - [x] Veritabanı: `flight_sessions.drone_id`, `flight_sessions.drone_serial`, `photos.drone_id` (başlangıçta otomatik migration)
 - [x] RTH hesaplama, 120 m kontrolü, kalkış rakımı uyarısı (eşik: `HOME_ALT_WARN_DIFF_M`, varsayılan 3)
 - [x] Başka drone varken v1 istemciye/istemciyle görevin reddi (§6.3)
-- [x] `"all" → hover` geçici olarak kapalı (§3.3)
+- [x] `"all" → hover` yeniden açık (Android düzeltmesinden sonra, §3.3)
 - [x] `drone-2` için varsayılan +10 m görev irtifası (dashboard'da)
 - [ ] Alan bazında birleşik ortomozaik
 

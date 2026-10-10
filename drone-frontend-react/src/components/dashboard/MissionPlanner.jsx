@@ -201,7 +201,7 @@ function StatusBanner({ status }) {
 // ─── Main ──────────────────────────────────────────────────────────────────────
 export function MissionPlanner() {
   const { selectedAreaId, drawOrder, setScanRoute } = useMap();
-  const { socket, isConnected, droneStatus, selectedDroneId, drones } = useSocket();
+  const { socket, isConnected, droneStatus, selectedDroneId, drones, sendCommand } = useSocket();
   const { dronePosition } = useTelemetry();
 
   const [areaId,         setAreaId]         = useState('');
@@ -265,12 +265,29 @@ export function MissionPlanner() {
     const onStopped = (data) => {
       if (!isMine(data)) return;
       setMissionStatus('stopped');
-      setStatus({ type: 'warning', msg: '⚠️ Görev durduruldu.' });
+      setStatus({
+        type: 'warning',
+        msg: data?.reason === 'emergency_land'
+          ? '⚠️ Görev acil iniş için durduruldu — drone iniyor.'
+          : '⚠️ Görev durduruldu.'
+      });
     };
     // Android, waypoint_mission'ı kabul etmezse (örn. 500m güvenlik kilidi)
     // bunu command_response ile bildirir — mission_progress hiç gelmez.
     const onCommandResponse = (data) => {
-      if (data?.command !== 'waypoint_mission' || !isMine(data)) return;
+      if (!isMine(data)) return;
+      // Pause / resume results (hover during a mission pauses it on Android)
+      if (data?.command === 'hover' || data?.command === 'resume_mission') {
+        const ok = data.status === 'success' || data.status === 'started';
+        if (data.command === 'hover' && ok) setMissionStatus(s => (s === 'running' ? 'paused' : s));
+        if (data.command === 'resume_mission' && ok) setMissionStatus('running');
+        setStatus(ok
+          ? { type: data.command === 'hover' ? 'warning' : 'success',
+              msg: data.command === 'hover' ? '⏸️ Görev duraklatıldı — drone havada bekliyor.' : '▶️ Görev kaldığı yerden devam ediyor.' }
+          : { type: 'error', msg: `❌ "${data.command}" başarısız${data.error ? `: ${data.error}` : ''}` });
+        return;
+      }
+      if (data?.command !== 'waypoint_mission') return;
       if (data?.status !== 'failed' && data?.status !== 'rejected') return;
       setMissionStatus(null);
       setStatus({ type: 'error', msg: `❌ Görev reddedildi: ${data.error || 'bilinmeyen hata'}` });
@@ -384,13 +401,23 @@ export function MissionPlanner() {
     }
   };
 
+  const handlePause = () => {
+    sendCommand('hover', {});
+    setStatus({ type: 'info', msg: '⏸️ Duraklatma komutu gönderildi…' });
+  };
+
+  const handleResume = () => {
+    sendCommand('resume_mission', {});
+    setStatus({ type: 'info', msg: '▶️ Devam komutu gönderildi…' });
+  };
+
   const handleClearRoute = () => {
     setScanRoute(null); setPlannedMission(null);
     setStatus(null); setMissionStatus(null);
   };
 
   const canPlan  = !!effectiveAreaId && !loading;
-  const canStart = !!plannedMission && isConnected && !loading && missionStatus !== 'running';
+  const canStart = !!plannedMission && isConnected && !loading && missionStatus !== 'running' && missionStatus !== 'paused';
   const canStop  = isConnected && (selectedOnMission || (missionStatus === 'running' && missionDroneId === selectedDroneId));
   const stripPrev = (2 * Number(altitudeM) * Math.tan(82.1 / 2 * Math.PI / 180) * (1 - Number(overlapPercent) / 100)).toFixed(0);
 
@@ -574,6 +601,17 @@ export function MissionPlanner() {
               </button>
 
               {canStop && (
+                <>
+                  <button className="btn btn-secondary" onClick={handlePause}>
+                    <i className="fas fa-pause me-2"></i>Duraklat
+                  </button>
+                  <button className="btn btn-primary" onClick={handleResume}>
+                    <i className="fas fa-play me-2"></i>Devam Et
+                  </button>
+                </>
+              )}
+
+              {canStop && (
                 <button className="btn btn-danger" onClick={handleStop}>
                   <i className="fas fa-stop me-2"></i>Görevi Durdur (RTH){selectedDroneId ? ` — ${droneLabel(selectedDroneId)}` : ''}
                 </button>
@@ -593,7 +631,7 @@ export function MissionPlanner() {
             <StatusBanner status={status} />
 
             {/* ── Progress bar ── */}
-            {missionStatus === 'running' && plannedMission && (
+            {(missionStatus === 'running' || missionStatus === 'paused') && plannedMission && (
               <div className="mb-3">
                 <div className="d-flex justify-content-between mb-1">
                   <small className="text-muted">Görev ilerleme{missionDroneId ? ` — ${droneLabel(missionDroneId)}` : ''}</small>
@@ -626,10 +664,12 @@ export function MissionPlanner() {
                   { val: `${plannedMission.altitudePlanned ?? altitudeM} m`, lbl: 'Planlama İrtifası', cls: 'text-secondary' },
                   {
                     val: missionStatus === 'running'  ? 'UÇUYOR'     :
+                         missionStatus === 'paused'   ? 'DURAKLATILDI' :
                          missionStatus === 'complete' ? 'TAMAMLANDI' :
                          missionStatus === 'stopped'  ? 'DURDURULDU' : 'HAZIR',
                     lbl: 'Görev Durumu',
                     cls: missionStatus === 'running'  ? 'text-warning' :
+                         missionStatus === 'paused'   ? 'text-secondary' :
                          missionStatus === 'complete' ? 'text-success' :
                          missionStatus === 'stopped'  ? 'text-danger'  : 'text-muted'
                   }

@@ -4,8 +4,8 @@
  * Shows every drone the backend knows (drones_state) as a selectable chip.
  * The selected drone is the target of every command, mission and telemetry
  * card on the dashboard. "Tümü" buttons send emergency commands to all
- * connected drones (backend fans them out per drone; hover is excluded until
- * Android stops running missions on hover — MULTI_DRONE_PROTOCOL.md §3.3).
+ * connected drones (backend fans them out per drone; hover pauses a running
+ * mission — MULTI_DRONE_PROTOCOL.md §3.3).
  */
 
 import { useSocket } from '@contexts/SocketContext';
@@ -14,6 +14,7 @@ import { droneColor, droneLabel, flightModeLabel } from '@utils/constants';
 
 const ALL_ACTIONS = [
   { command: 'emergency_land', label: 'Acil İniş', icon: 'fa-arrow-down', confirm: 'TÜM drone\'lar bulundukları yere acil iniş yapsın mı?', cls: 'btn-danger' },
+  { command: 'hover',          label: 'Duraklat',  icon: 'fa-pause',      confirm: 'TÜM drone\'lar olduğu yerde dursun mu? (görevler duraklar)', cls: 'btn-secondary' },
   { command: 'returnHome',     label: 'Eve Dön',   icon: 'fa-home',       confirm: 'TÜM drone\'lar eve dönsün mü (RTH)?',               cls: 'btn-warning' },
   { command: 'stop_mission',   label: 'Görevi Durdur', icon: 'fa-stop',   confirm: 'TÜM drone\'ların görevi durdurulsun mu?',           cls: 'btn-outline-danger' }
 ];
