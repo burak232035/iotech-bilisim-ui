@@ -2,6 +2,7 @@ const express = require("express");
 const http = require("http");
 const path = require("path");
 const { initializeSocketIO, getConnectionSnapshot } = require("./socket.io");
+const { runMigrations } = require("./db/migrate");
 
 const reportRoutes   = require("./routes/report.routes");
 const areaRoutes     = require("./routes/area.routes");
@@ -100,8 +101,15 @@ app.use("/api/landcover", landcoverRoutes);
 app.use("/reports", express.static(path.join(__dirname, "reports")));
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
-const PORT = 3001;
-httpServer.listen(PORT, () => {
-  console.log(`✅ Backend çalışıyor: http://localhost:${PORT}`);
-  console.log(`🔌 Socket.IO ready on port ${PORT}`);
-});
+// PORT / DB_NAME env vars let a test instance run beside the live one
+// (npm run start:test → port 3002, drone_tracking_test).
+const PORT = Number(process.env.PORT) || 3001;
+
+runMigrations()
+  .catch((err) => console.error("❌ Database migration failed:", err.message))
+  .finally(() => {
+    httpServer.listen(PORT, () => {
+      console.log(`✅ Backend çalışıyor: http://localhost:${PORT} (db: ${process.env.DB_NAME || "drone_tracking"})`);
+      console.log(`🔌 Socket.IO ready on port ${PORT}`);
+    });
+  });

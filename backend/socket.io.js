@@ -2,20 +2,41 @@ const { Server } = require("socket.io");
 const TelemetryService = require("./services/telemetry.service");
 const FlightSessionModel = require("./models/flightSession.model");
 
+/*
+ * Multi-drone Socket.IO hub — protocol v2, see MULTI_DRONE_PROTOCOL.md.
+ *
+ * Each drone is identified by a droneId ("drone-1", "drone-2", …). A v1 client
+ * (no `protocol` field in register) is treated as "drone-1", so the existing
+ * tablet build keeps working unchanged.
+ *
+ * Commands from the web are never broadcast to every drone: they go to the
+ * target drone's room only (see resolveCommandTargets).
+ */
+
 let io = null;
-let currentSession = null;
 const webClients = new Set();
-const droneClients = new Set();
 
-// Last known drone GPS fix (from telemetry once it carries lat/lon, or from drone_photo
-// today). Used as the default "home" position so mission planning can start the route
-// from whichever end is closest to the drone instead of assuming it sits on waypoint 0.
-let lastKnownPosition = null; // { lat, lon, updatedAt }
+// droneId -> drone entry (survives disconnects so sessions can resume)
+const drones = new Map();
+// socket.id -> droneId, for sockets that are the drone's active connection
+const socketToDrone = new Map();
+// socket.id -> { droneId, protocol } for v2 sockets that registered without a
+// serial while another device holds that droneId (app connected before the
+// aircraft). They get no commands until a register with a serial arrives.
+const pendingSockets = new Map();
 
-function updateLastKnownPosition(lat, lon) {
-  if (typeof lat !== "number" || typeof lon !== "number") return;
-  lastKnownPosition = { lat, lon, updatedAt: Date.now() };
-}
+// "hover" is left out for now: on Android it doesn't stop a running waypoint
+// mission yet, so an "all → hover" emergency button would be misleading.
+// Re-add once Android fixes it (MULTI_DRONE_PROTOCOL.md §3.3).
+const ALL_TARGET_COMMANDS = new Set(["emergency_land", "returnHome", "stop_mission"]);
+
+const SESSION_DISCONNECT_TIMEOUT_MS = 30 * 60 * 1000; // end session after 30 min offline
+const LANDED_CONFIRM_MS             = 60 * 1000;      // landed this long after mission_complete
+const LANDED_AGL_THRESHOLD_M        = 1.5;            // v1 fallback when isFlying is absent
+const SWEEP_INTERVAL_MS             = 30 * 1000;
+
+// Last known GPS fix of any drone — kept for callers that don't pass a droneId.
+let lastKnownPosition = null; // { lat, lon, updatedAt, droneId }
 
 // drone_photo diagnostics — polled via /api/debug/connections so we can verify
 // live whether photos are arriving without needing terminal scrollback access.
@@ -27,6 +48,321 @@ const photoStats = {
   lastRejectReason: null,
   lastSizeBytes:  null
 };
+
+// Serialises async work per key (register handling per droneId) so two quick
+// registers on the same socket can't create two sessions.
+const locks = new Map();
+function withLock(key, fn) {
+  const prev = locks.get(key) || Promise.resolve();
+  const next = prev.then(fn, fn);
+  locks.set(key, next.catch(() => {}));
+  return next;
+}
+
+function getOrCreateDrone(droneId) {
+  let entry = drones.get(droneId);
+  if (!entry) {
+    entry = {
+      droneId,
+      socketId:          null,
+      serial:            null,
+      protocol:          1,
+      appVersion:        null,
+      session:           null,   // flight_sessions row
+      activeAreaId:      null,
+      activeMission:     null,   // { maxAltitude, rthHeight, startedAt }
+      lastTelemetry:     null,
+      lastPosition:      null,   // { lat, lon, updatedAt }
+      connectedAt:       null,
+      disconnectedAt:    null,
+      missionCompleteAt: null,
+      landedSince:       null
+    };
+    drones.set(droneId, entry);
+  }
+  return entry;
+}
+
+function isConnected(entry) {
+  return !!entry.socketId;
+}
+
+function connectedDrones() {
+  return [...drones.values()].filter(isConnected);
+}
+
+function droneRoom(droneId) {
+  return `drone:${droneId}`;
+}
+
+function emitToWeb(event, payload) {
+  webClients.forEach((clientId) => io.to(clientId).emit(event, payload));
+}
+
+function droneSummary(entry) {
+  return {
+    droneId:     entry.droneId,
+    connected:   isConnected(entry),
+    serial:      entry.serial,
+    protocol:    entry.protocol,
+    appVersion:  entry.appVersion,
+    sessionId:   entry.session ? entry.session.id : null,
+    areaId:      entry.activeAreaId,
+    rthHeight:   entry.activeMission ? entry.activeMission.rthHeight : null,
+    lastPosition: entry.lastPosition,
+    connectedAt: entry.connectedAt,
+    disconnectedAt: entry.disconnectedAt
+  };
+}
+
+function broadcastDronesState() {
+  emitToWeb("drones_state", { drones: [...drones.values()].map(droneSummary) });
+}
+
+function updatePosition(entry, lat, lon) {
+  if (typeof lat !== "number" || typeof lon !== "number") return;
+  const now = Date.now();
+  entry.lastPosition = { lat, lon, updatedAt: now };
+  lastKnownPosition = { lat, lon, updatedAt: now, droneId: entry.droneId };
+}
+
+function sessionStartedPayload(entry) {
+  return {
+    sessionId: entry.session.id,
+    droneId:   entry.droneId,
+    startTime: entry.session.start_time,
+    areaId:    entry.activeAreaId ?? entry.session.area_id ?? null
+  };
+}
+
+async function endDroneSession(entry, reason) {
+  if (!entry.session) return;
+  const sessionId = entry.session.id;
+  entry.session = null;
+  entry.activeAreaId = null;
+  entry.activeMission = null;
+  entry.missionCompleteAt = null;
+  entry.landedSince = null;
+  try {
+    await FlightSessionModel.endSession(sessionId);
+    console.log(`🛑 Flight session ended: ID ${sessionId} (${entry.droneId}, ${reason})`);
+  } catch (err) {
+    console.error(`❌ Error ending session ${sessionId}:`, err.message);
+  }
+  emitToWeb("session_ended", { sessionId, droneId: entry.droneId, reason });
+  broadcastDronesState();
+}
+
+/**
+ * Give the drone an open session: keep the one in memory, resume lastSessionId
+ * if it's still open and belongs to this drone, otherwise start a new one.
+ */
+async function ensureSession(entry, lastSessionId) {
+  if (entry.session) return;
+
+  if (lastSessionId) {
+    try {
+      const row = await FlightSessionModel.getById(Number(lastSessionId));
+      const ownedByDrone = row && (row.drone_id === entry.droneId || row.drone_id == null);
+      if (row && row.status === "active" && ownedByDrone) {
+        entry.session = row;
+        entry.activeAreaId = row.area_id ?? null;
+        console.log(`🔁 Session resumed: ID ${row.id} (${entry.droneId})`);
+        return;
+      }
+    } catch (err) {
+      console.error("❌ Error resuming session:", err.message);
+    }
+  }
+
+  entry.session = await FlightSessionModel.createSession({
+    start_time:   new Date(),
+    drone_id:     entry.droneId,
+    drone_serial: entry.serial
+  });
+  entry.activeAreaId = null;
+  console.log(`🚁 Flight session started: ID ${entry.session.id} (${entry.droneId})`);
+}
+
+async function handleDroneRegister(socket, data) {
+  const protocol = Number(data?.protocol) || 1;
+  const droneId  = protocol >= 2 && data?.droneId ? String(data.droneId) : "drone-1";
+  const serial   = data?.serial ? String(data.serial) : null;
+
+  return withLock(droneId, async () => {
+    // Socket was the active connection of another droneId: detach it (rare).
+    const previousId = socketToDrone.get(socket.id);
+    if (previousId && previousId !== droneId) {
+      const prev = drones.get(previousId);
+      if (prev && prev.socketId === socket.id) prev.socketId = null;
+      socketToDrone.delete(socket.id);
+      socket.leave(droneRoom(previousId));
+    }
+
+    const entry = getOrCreateDrone(droneId);
+    const otherSocketId = entry.socketId && entry.socketId !== socket.id ? entry.socketId : null;
+
+    if (otherSocketId) {
+      if (entry.serial && serial && entry.serial !== serial) {
+        console.warn(`⛔ register_rejected: ${droneId} in use by serial ${entry.serial}, got ${serial}`);
+        pendingSockets.delete(socket.id);
+        socket.emit("register_rejected", {
+          reason: "droneId_in_use",
+          droneId,
+          activeSerial: entry.serial
+        });
+        socket.disconnect(true);
+        return;
+      }
+      if (entry.serial && !serial && protocol >= 2) {
+        // App connected before its aircraft — can't tell yet whether it's the
+        // same device. Wait for the register that carries the serial.
+        pendingSockets.set(socket.id, { droneId, protocol });
+        console.log(`⏳ ${droneId} register without serial on ${socket.id} — pending until serial arrives`);
+        return;
+      }
+      // Same device reconnecting (same serial, or v1 client without serial).
+      const oldSocket = io.sockets.sockets.get(otherSocketId);
+      socketToDrone.delete(otherSocketId);
+      if (oldSocket) oldSocket.disconnect(true);
+      console.log(`🔄 ${droneId} reconnected: ${otherSocketId} → ${socket.id}`);
+    }
+
+    pendingSockets.delete(socket.id);
+    const isNewConnection = entry.socketId !== socket.id;
+    entry.socketId   = socket.id;
+    entry.protocol   = protocol;
+    entry.serial     = serial || entry.serial;
+    entry.appVersion = data?.appVersion || entry.appVersion;
+    if (isNewConnection) {
+      entry.connectedAt    = Date.now();
+      entry.disconnectedAt = null;
+    }
+    socketToDrone.set(socket.id, droneId);
+    socket.join(droneRoom(droneId));
+
+    try {
+      await ensureSession(entry, data?.lastSessionId);
+      if (entry.serial && entry.session && !entry.session.drone_serial) {
+        entry.session = (await FlightSessionModel.setDroneSerial(entry.session.id, entry.serial)) || entry.session;
+      }
+    } catch (err) {
+      console.error("❌ Error starting session:", err.message);
+    }
+
+    console.log(
+      `📱 Drone registered: ${droneId} (protocol ${protocol}` +
+      `${entry.serial ? `, serial ${entry.serial}` : ""}) on ${socket.id}`
+    );
+
+    if (entry.session) {
+      socket.emit("session_started", sessionStartedPayload(entry));
+      emitToWeb("session_info", { ...entry.session, droneId });
+    }
+    broadcastDronesState();
+  });
+}
+
+/**
+ * Resolve which drones a web-originated command goes to.
+ * @returns {{targets: Array, error?: string}}
+ */
+function resolveCommandTargets(droneId, commandName) {
+  const online = connectedDrones();
+
+  if (droneId === "all") {
+    if (!ALL_TARGET_COMMANDS.has(commandName)) {
+      return { targets: [], error: `"all" hedefi yalnızca ${[...ALL_TARGET_COMMANDS].join(", ")} için kullanılabilir` };
+    }
+    if (online.length === 0) return { targets: [], error: "Bağlı drone yok" };
+    return { targets: online };
+  }
+
+  if (droneId) {
+    const entry = drones.get(String(droneId));
+    if (!entry || !isConnected(entry)) return { targets: [], error: `${droneId} bağlı değil` };
+    return { targets: [entry] };
+  }
+
+  if (online.length === 0) return { targets: [], error: "Bağlı drone yok" };
+  if (online.length > 1) {
+    return { targets: [], error: "Birden fazla drone bağlı — komut için droneId seçilmeli" };
+  }
+  return { targets: online };
+}
+
+/** Emit to a drone's room, stamping the payload with that drone's own id. */
+function sendToDrone(entry, event, payload) {
+  io.to(droneRoom(entry.droneId)).emit(event, { ...payload, droneId: entry.droneId });
+}
+
+/**
+ * Called by the mission route right before waypoint_mission: records the area
+ * and mission, then re-sends session_started carrying the areaId.
+ */
+async function prepareMissionStart(entry, { areaId, maxAltitude, rthHeight }) {
+  entry.activeAreaId      = areaId ?? null;
+  entry.activeMission     = { maxAltitude, rthHeight, startedAt: Date.now() };
+  entry.missionCompleteAt = null;
+  entry.landedSince       = null;
+
+  if (!entry.session) return;
+  if (areaId != null && entry.session.area_id !== areaId) {
+    try {
+      entry.session = (await FlightSessionModel.setArea(entry.session.id, areaId)) || entry.session;
+    } catch (err) {
+      console.error("❌ Error setting session area:", err.message);
+    }
+  }
+  io.to(droneRoom(entry.droneId)).emit("session_started", sessionStartedPayload(entry));
+  broadcastDronesState();
+}
+
+const mismatchWarnedAt = new Map();
+/** Attach the socket's droneId to an upstream payload (socket mapping wins). */
+function stampDroneId(socket, data, eventName) {
+  const droneId = socketToDrone.get(socket.id);
+  if (!droneId) return data;
+  if (data && data.droneId && data.droneId !== droneId) {
+    const key = `${socket.id}:${eventName}`;
+    const last = mismatchWarnedAt.get(key) || 0;
+    if (Date.now() - last > 60000) {
+      console.warn(`⚠️  ${eventName}: payload droneId "${data.droneId}" ≠ socket ${droneId} — socket eşlemesi kullanılıyor`);
+      mismatchWarnedAt.set(key, Date.now());
+    }
+  }
+  return { ...(data || {}), droneId };
+}
+
+function checkLanded(entry, data) {
+  if (!entry.missionCompleteAt || !entry.session) return;
+  const flying = typeof data?.isFlying === "boolean"
+    ? data.isFlying
+    : (typeof data?.altitude?.agl === "number" ? data.altitude.agl > LANDED_AGL_THRESHOLD_M : null);
+  if (flying === null) return;
+
+  if (flying) {
+    entry.landedSince = null;
+    return;
+  }
+  const now = Date.now();
+  if (!entry.landedSince) entry.landedSince = now;
+  if (now - entry.landedSince >= LANDED_CONFIRM_MS) {
+    endDroneSession(entry, "landed");
+  }
+}
+
+function startSessionSweeper() {
+  setInterval(() => {
+    const now = Date.now();
+    for (const entry of drones.values()) {
+      if (entry.session && !isConnected(entry) && entry.disconnectedAt &&
+          now - entry.disconnectedAt >= SESSION_DISCONNECT_TIMEOUT_MS) {
+        endDroneSession(entry, "disconnect_timeout");
+      }
+    }
+  }, SWEEP_INTERVAL_MS);
+}
 
 /**
  * Initialize Socket.IO server
@@ -42,139 +378,108 @@ function initializeSocketIO(httpServer) {
     transports: ["websocket", "polling"]
   });
 
-  io.on("connection", async (socket) => {
-    console.log(`🔌 New connection: ${socket.id}`);
+  startSessionSweeper();
 
-    // Auto-detect drone client (fallback)
-    // If first event is drone_telemetry, treat as drone
-    let isDroneAutoDetected = false;
+  io.on("connection", (socket) => {
+    console.log(`🔌 New connection: ${socket.id}`);
 
     // Client registration
     socket.on("register", async (data) => {
       if (data?.role === "drone") {
-        droneClients.add(socket.id);
-        console.log(`📱 Drone registered: ${socket.id}`);
-
-        // Auto-start new session when drone connects
-        try {
-          currentSession = await FlightSessionModel.createSession({
-            start_time: new Date()
-          });
-
-          socket.emit("session_started", {
-            sessionId: currentSession.id,
-            startTime: currentSession.start_time
-          });
-
-          // Notify all web clients
-          webClients.forEach((clientId) => {
-            io.to(clientId).emit("session_info", currentSession);
-          });
-
-          console.log(`🚁 Flight session started: ID ${currentSession.id}`);
-        } catch (err) {
-          console.error("❌ Error starting session:", err.message);
-        }
+        await handleDroneRegister(socket, data);
       }
       else if (data?.role === "web") {
         webClients.add(socket.id);
         console.log(`🖥️  Web client registered: ${socket.id}`);
 
-        // Send current session info if exists
-        if (currentSession) {
-          socket.emit("session_info", currentSession);
+        for (const entry of drones.values()) {
+          if (entry.session) socket.emit("session_info", { ...entry.session, droneId: entry.droneId });
         }
+        socket.emit("drones_state", { drones: [...drones.values()].map(droneSummary) });
       }
     });
 
     // Drone → Server: High-frequency telemetry (10 Hz)
     socket.on("drone_telemetry", async (data) => {
-      // Auto-register as drone if not registered
-      if (!droneClients.has(socket.id) && !webClients.has(socket.id)) {
+      if (pendingSockets.has(socket.id)) return;
+
+      // v1 fallback: a client that sends telemetry without registering is drone-1
+      if (!socketToDrone.has(socket.id) && !webClients.has(socket.id)) {
         console.log(`📱 Auto-registering ${socket.id} as drone (received telemetry)`);
-        droneClients.add(socket.id);
-        isDroneAutoDetected = true;
-
-        // Auto-start session
-        if (!currentSession) {
-          try {
-            currentSession = await FlightSessionModel.createSession({
-              start_time: new Date()
-            });
-
-            socket.emit("session_started", {
-              sessionId: currentSession.id,
-              startTime: currentSession.start_time
-            });
-
-            webClients.forEach((clientId) => {
-              io.to(clientId).emit("session_info", currentSession);
-            });
-
-            console.log(`🚁 Flight session auto-started: ID ${currentSession.id}`);
-          } catch (err) {
-            console.error("❌ Error auto-starting session:", err.message);
-          }
-        }
+        await handleDroneRegister(socket, { role: "drone" });
       }
 
-      if (!currentSession) {
-        console.warn("⚠️  Telemetry received but no active session");
+      const droneId = socketToDrone.get(socket.id);
+      const entry = droneId && drones.get(droneId);
+      if (!entry) return;
+
+      if (!entry.session) {
+        console.warn(`⚠️  Telemetry received from ${droneId} but no active session`);
         return;
       }
 
-      // Track live position if the telemetry payload carries lat/lon
-      updateLastKnownPosition(data?.lat, data?.lon);
+      const stamped = stampDroneId(socket, data, "drone_telemetry");
+      entry.lastTelemetry = stamped;
+      updatePosition(entry, data?.lat, data?.lon);
 
       // Buffer telemetry (non-blocking)
-      TelemetryService.bufferTelemetry(currentSession.id, data);
+      TelemetryService.bufferTelemetry(entry.session.id, stamped);
 
-      // Broadcast to web clients (throttled to 1 Hz per client)
-      TelemetryService.broadcastTelemetry(io, webClients, data);
+      // Broadcast to web clients (throttled to 1 Hz per client per drone)
+      TelemetryService.broadcastTelemetry(io, webClients, stamped);
+
+      checkLanded(entry, data);
     });
 
-    // Web → Drone: Data request
+    // Web → Drone: Data request (read-only, so a missing droneId fans out to every drone)
     socket.on("data_request", (request) => {
-      console.log(`📤 Data request from ${socket.id}:`, request.type);
-
-      // Forward to all drone clients
-      droneClients.forEach((droneId) => {
-        io.to(droneId).emit("data_request", request);
-      });
+      console.log(`📤 Data request from ${socket.id}:`, request?.type);
+      const targets = request?.droneId && request.droneId !== "all"
+        ? resolveCommandTargets(request.droneId, "data_request").targets
+        : connectedDrones();
+      targets.forEach((entry) => sendToDrone(entry, "data_request", request));
     });
 
     // Drone → Web: Data response
     socket.on("data_response", (response) => {
-      console.log(`📥 Data response:`, response.type);
-
-      // Broadcast to all web clients
-      webClients.forEach((clientId) => {
-        io.to(clientId).emit("data_response", response);
-      });
+      console.log(`📥 Data response:`, response?.type);
+      emitToWeb("data_response", stampDroneId(socket, response, "data_response"));
     });
 
     // Drone → Web: Command execution result (takeoff/land/hover/gimbal/emergency_land vb.)
     socket.on("command_response", (data) => {
-      webClients.forEach((clientId) => {
-        io.to(clientId).emit("command_response", data);
-      });
+      emitToWeb("command_response", stampDroneId(socket, data, "command_response"));
     });
 
-    // Web → Drone: Control commands (takeoff, land, etc.)
+    // Web → Drone: Control commands (takeoff, land, etc.) — targeted, never broadcast
     socket.on("drone_command", (command) => {
-      console.log(`🎮 Drone command from ${socket.id}:`, command.command);
+      const name = command?.command;
+      const { targets, error } = resolveCommandTargets(command?.droneId, name);
 
-      // Forward to all drone clients
-      droneClients.forEach((droneId) => {
-        io.to(droneId).emit("drone_command", command);
-      });
+      if (error) {
+        console.warn(`⛔ Drone command "${name}" rejected: ${error}`);
+        socket.emit("command_response", {
+          command:   name,
+          droneId:   command?.droneId ?? null,
+          status:    "failed",
+          error,
+          source:    "backend",
+          timestamp: Date.now()
+        });
+        return;
+      }
+
+      const targetIds = targets.map((t) => t.droneId);
+      console.log(`🎮 Drone command from ${socket.id}: ${name} → ${targetIds.join(", ")}`);
+      targets.forEach((entry) => sendToDrone(entry, "drone_command", command));
 
       // Notify other web clients
       webClients.forEach((clientId) => {
         if (clientId !== socket.id) {
           io.to(clientId).emit("drone_command_sent", {
-            command: command.command,
-            sentBy: socket.id
+            command:  name,
+            droneIds: targetIds,
+            sentBy:   socket.id
           });
         }
       });
@@ -183,32 +488,38 @@ function initializeSocketIO(httpServer) {
     // Drone → Web: Obstacle detected (from drone sensors)
     socket.on("obstacle_detected", (data) => {
       console.log(`🚧 Obstacle detected from ${socket.id}:`, data);
-      webClients.forEach((clientId) => {
-        io.to(clientId).emit("obstacle_detected", data);
-      });
+      emitToWeb("obstacle_detected", stampDroneId(socket, data, "obstacle_detected"));
     });
 
     // Drone → Web: Waypoint mission progress updates
     socket.on("mission_progress", (data) => {
-      webClients.forEach((clientId) => {
-        io.to(clientId).emit("mission_progress", data);
-      });
+      emitToWeb("mission_progress", stampDroneId(socket, data, "mission_progress"));
     });
 
     // Drone → Web: Waypoint mission completed
     socket.on("mission_complete", (data) => {
-      console.log(`✅ Mission complete from ${socket.id}`);
-      webClients.forEach((clientId) => {
-        io.to(clientId).emit("mission_complete", data);
-      });
+      const stamped = stampDroneId(socket, data, "mission_complete");
+      console.log(`✅ Mission complete from ${stamped.droneId || socket.id}`);
+      const entry = drones.get(stamped.droneId);
+      if (entry) {
+        entry.missionCompleteAt = Date.now();
+        entry.landedSince = null;
+      }
+      emitToWeb("mission_complete", stamped);
     });
 
     // Drone → Web: Mission stopped/aborted
     socket.on("mission_stopped", (data) => {
-      console.log(`🛑 Mission stopped from ${socket.id}`);
-      webClients.forEach((clientId) => {
-        io.to(clientId).emit("mission_stopped", data);
-      });
+      const stamped = stampDroneId(socket, data, "mission_stopped");
+      console.log(`🛑 Mission stopped from ${stamped.droneId || socket.id}`);
+      const entry = drones.get(stamped.droneId);
+      if (entry) entry.activeMission = null;
+      emitToWeb("mission_stopped", stamped);
+    });
+
+    // Drone → Web: Post-landing full-resolution upload progress
+    socket.on("photo_upload_status", (data) => {
+      emitToWeb("photo_upload_status", stampDroneId(socket, data, "photo_upload_status"));
     });
 
     // Drone → Web: Camera photo with GPS coordinates for map overlay
@@ -223,8 +534,9 @@ function initializeSocketIO(httpServer) {
         photoStats.lastRejectReason = reason;
         return;
       }
+      const stamped = stampDroneId(socket, data, "drone_photo");
       console.log(
-        `📷 Photo from drone: ${data.lat.toFixed(5)}, ${data.lon.toFixed(5)} ` +
+        `📷 Photo from ${stamped.droneId || "drone"}: ${data.lat.toFixed(5)}, ${data.lon.toFixed(5)} ` +
         `@ ${data.altitude ?? '?'}m, heading ${data.heading ?? '?'}°`
       );
       photoStats.receivedCount += 1;
@@ -233,39 +545,30 @@ function initializeSocketIO(httpServer) {
       // Kept for debugging without needing terminal scrollback access —
       // full recent payload metadata queryable via /api/debug/connections.
       photoStats.lastPhotoMeta = {
+        droneId: stamped.droneId ?? null,
         lat: data.lat, lon: data.lon, altitude: data.altitude ?? null, heading: data.heading ?? null
       };
-      updateLastKnownPosition(data.lat, data.lon);
-      webClients.forEach((clientId) => {
-        io.to(clientId).emit("drone_photo", data);
-      });
+      const entry = drones.get(stamped.droneId);
+      if (entry) updatePosition(entry, data.lat, data.lon);
+      emitToWeb("drone_photo", stamped);
     });
 
-    // Handle disconnection
-    socket.on("disconnect", async () => {
+    // Handle disconnection — a drone's session is NOT ended here; it ends on
+    // landing after mission_complete or after SESSION_DISCONNECT_TIMEOUT_MS.
+    socket.on("disconnect", () => {
       console.log(`❌ Disconnected: ${socket.id}`);
-
-      const wasDrone = droneClients.has(socket.id);
       webClients.delete(socket.id);
-      droneClients.delete(socket.id);
+      pendingSockets.delete(socket.id);
+      TelemetryService.forgetClient(socket.id);
 
-      // If drone disconnects, end session
-      if (wasDrone && droneClients.size === 0 && currentSession) {
-        try {
-          await FlightSessionModel.endSession(currentSession.id);
-          console.log(`🛑 Flight session ended: ID ${currentSession.id}`);
-
-          // Notify web clients
-          webClients.forEach((clientId) => {
-            io.to(clientId).emit("session_ended", {
-              sessionId: currentSession.id
-            });
-          });
-
-          currentSession = null;
-        } catch (err) {
-          console.error("❌ Error ending session:", err.message);
-        }
+      const droneId = socketToDrone.get(socket.id);
+      socketToDrone.delete(socket.id);
+      const entry = droneId && drones.get(droneId);
+      if (entry && entry.socketId === socket.id) {
+        entry.socketId = null;
+        entry.disconnectedAt = Date.now();
+        console.log(`📴 ${droneId} offline${entry.session ? ` — session ${entry.session.id} kept open` : ""}`);
+        broadcastDronesState();
       }
     });
   });
@@ -283,20 +586,41 @@ function getIO() {
 }
 
 /**
- * Get current active session
+ * Active session for callers that predate multi-drone support (e.g. report
+ * generation without a sessionId): the most recently started open session.
  * @returns {Object|null}
  */
 function getCurrentSession() {
-  return currentSession;
+  let latest = null;
+  for (const entry of drones.values()) {
+    if (!entry.session) continue;
+    if (!latest || new Date(entry.session.start_time) > new Date(latest.start_time)) {
+      latest = entry.session;
+    }
+  }
+  return latest;
 }
 
 /**
- * Get the live Set of drone client socket IDs.
- * Used by mission.routes.js to send waypoint_mission commands.
+ * Get the Set of connected drone socket IDs.
  * @returns {Set<string>}
  */
 function getDroneClients() {
-  return droneClients;
+  return new Set(connectedDrones().map((e) => e.socketId));
+}
+
+/**
+ * Drone entry by id, or null.
+ */
+function getDrone(droneId) {
+  return drones.get(droneId) || null;
+}
+
+/**
+ * All known drone entries (connected or not).
+ */
+function getDrones() {
+  return [...drones.values()];
 }
 
 /**
@@ -304,24 +628,30 @@ function getDroneClients() {
  * Used by GET /api/debug/connections
  */
 function getConnectionSnapshot() {
+  const online = connectedDrones();
+  const current = getCurrentSession();
   return {
-    droneCount:       droneClients.size,
+    droneCount:       online.length,
     webCount:         webClients.size,
-    droneSocketIds:   [...droneClients],
+    droneSocketIds:   online.map((e) => e.socketId),
     webSocketIds:     [...webClients],
-    activeSession:    currentSession
-      ? { id: currentSession.id, startTime: currentSession.start_time }
-      : null,
+    pendingSockets:   [...pendingSockets.entries()].map(([socketId, p]) => ({ socketId, ...p })),
+    drones:           [...drones.values()].map(droneSummary),
+    activeSession:    current ? { id: current.id, startTime: current.start_time } : null,
     lastKnownPosition,
     photoStats
   };
 }
 
 /**
- * Last known drone GPS fix, or null if none received yet.
+ * Last known GPS fix of the given drone, or of any drone when droneId is omitted.
  * @returns {{lat:number, lon:number, updatedAt:number}|null}
  */
-function getLastKnownPosition() {
+function getLastKnownPosition(droneId) {
+  if (droneId) {
+    const entry = drones.get(droneId);
+    return entry ? entry.lastPosition : null;
+  }
   return lastKnownPosition;
 }
 
@@ -330,6 +660,11 @@ module.exports = {
   getIO,
   getCurrentSession,
   getDroneClients,
+  getDrone,
+  getDrones,
+  resolveCommandTargets,
+  sendToDrone,
+  prepareMissionStart,
   getConnectionSnapshot,
   getLastKnownPosition
 };

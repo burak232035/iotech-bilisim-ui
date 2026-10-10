@@ -113,22 +113,35 @@ class TelemetryService {
   }
 
   /**
-   * Broadcast telemetry to web clients (throttled to 1 Hz per client)
+   * Broadcast telemetry to web clients (throttled to 1 Hz per client, per drone —
+   * so one drone's stream can't starve another's)
    * @param {Object} io - Socket.IO server instance
    * @param {Set} webClients - Set of web client IDs
-   * @param {Object} data - Telemetry data
+   * @param {Object} data - Telemetry data (carries droneId)
    */
   broadcastTelemetry(io, webClients, data) {
     const now = Date.now();
+    const droneKey = data?.droneId || "drone-1";
 
     webClients.forEach((clientId) => {
-      const lastSent = this.lastBroadcast.get(clientId) || 0;
+      const key = `${clientId}|${droneKey}`;
+      const lastSent = this.lastBroadcast.get(key) || 0;
 
       if (now - lastSent >= this.BROADCAST_THROTTLE) {
         io.to(clientId).emit("drone_telemetry", data);
-        this.lastBroadcast.set(clientId, now);
+        this.lastBroadcast.set(key, now);
       }
     });
+  }
+
+  /**
+   * Drop throttle state of a disconnected client.
+   * @param {string} clientId
+   */
+  forgetClient(clientId) {
+    for (const key of this.lastBroadcast.keys()) {
+      if (key.startsWith(`${clientId}|`)) this.lastBroadcast.delete(key);
+    }
   }
 
   /**

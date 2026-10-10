@@ -187,6 +187,16 @@ CREATE TABLE IF NOT EXISTS landcover_analyses (
 CREATE INDEX IF NOT EXISTS idx_landcover_analyses_photo_id ON landcover_analyses(photo_id);
 
 -- ================================================
+-- Multi-drone (protocol v2) columns — see MULTI_DRONE_PROTOCOL.md
+-- Also applied at backend startup by db/migrate.js for existing databases.
+-- ================================================
+ALTER TABLE flight_sessions ADD COLUMN IF NOT EXISTS drone_id VARCHAR(50);
+ALTER TABLE flight_sessions ADD COLUMN IF NOT EXISTS drone_serial VARCHAR(100);
+CREATE INDEX IF NOT EXISTS idx_flight_sessions_drone_id ON flight_sessions(drone_id);
+
+ALTER TABLE photos ADD COLUMN IF NOT EXISTS drone_id VARCHAR(50);
+
+-- ================================================
 -- Success Message
 -- ================================================
 DO $$

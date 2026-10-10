@@ -3,20 +3,20 @@ const pool = require("../config/database");
 class PhotoModel {
   /**
    * Persist an uploaded full-resolution photo's metadata.
-   * @param {{sessionId, areaId, filePath, lat, lon, altitude, heading, capturedAt}} data
+   * @param {{sessionId, droneId, areaId, filePath, lat, lon, altitude, heading, capturedAt}} data
    * @returns {Promise<Object>}
    */
   static async create(data) {
     const {
-      sessionId, areaId = null, filePath,
+      sessionId, droneId = null, areaId = null, filePath,
       lat, lon, altitude = null, heading = null, capturedAt = null
     } = data;
 
     const result = await pool.query(
-      `INSERT INTO photos (session_id, area_id, file_path, lat, lon, altitude_agl, heading, captured_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO photos (session_id, drone_id, area_id, file_path, lat, lon, altitude_agl, heading, captured_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
-      [sessionId, areaId, filePath, lat, lon, altitude, heading, capturedAt]
+      [sessionId, droneId, areaId, filePath, lat, lon, altitude, heading, capturedAt]
     );
     return result.rows[0];
   }

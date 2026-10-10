@@ -64,6 +64,17 @@ export function SocketProvider({ children }) {
       setDroneStatus('session_ended');
     });
 
+    // Backend's live drone list (sent on register and on every connect/disconnect)
+    socketInstance.on(SOCKET_EVENTS.DRONES_STATE, (data) => {
+      const online = (data?.drones || []).filter((d) => d.connected);
+      if (online.length > 0) {
+        setDroneStatus('active');
+        if (online[0].sessionId) setCurrentSessionId(online[0].sessionId);
+      } else {
+        setDroneStatus((prev) => (prev === 'session_ended' ? prev : 'waiting'));
+      }
+    });
+
     // Cleanup on unmount
     return () => {
       SocketService.disconnect();

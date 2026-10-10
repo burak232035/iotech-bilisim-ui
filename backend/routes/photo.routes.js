@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 
 const PhotoModel = require("../models/photo.model");
+const FlightSessionModel = require("../models/flightSession.model");
 const WasteDetectionModel = require("../models/wasteDetection.model");
 const WasteDetectionService = require("../services/wasteDetection.service");
 
@@ -35,19 +36,27 @@ const upload = multer({
 /**
  * POST /api/photos/upload
  * Android'in iniş sonrası SD karttaki orijinal fotoğrafı yüklediği endpoint.
- * multipart/form-data: file + sessionId, areaId?, lat, lon, altitude?, heading?, capturedAt?
+ * multipart/form-data: file + sessionId, areaId?, lat, lon, altitude?, heading?, capturedAt?, droneId?
+ * droneId is optional (the session already belongs to one drone); a mismatch is only logged.
  */
 router.post("/upload", upload.single("file"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "file zorunludur" });
 
-    const { sessionId, areaId, lat, lon, altitude, heading, capturedAt } = req.body;
+    const { sessionId, areaId, lat, lon, altitude, heading, capturedAt, droneId } = req.body;
     if (!sessionId || lat === undefined || lon === undefined) {
       return res.status(400).json({ error: "sessionId, lat, lon zorunludur" });
     }
 
+    const session = await FlightSessionModel.getById(Number(sessionId));
+    const resolvedDroneId = session?.drone_id || droneId || null;
+    if (droneId && session?.drone_id && droneId !== session.drone_id) {
+      console.warn(`⚠️  Foto yükleme: droneId "${droneId}" ≠ oturum ${sessionId} (${session.drone_id})`);
+    }
+
     const photo = await PhotoModel.create({
       sessionId: Number(sessionId),
+      droneId: resolvedDroneId,
       areaId: areaId ? Number(areaId) : null,
       filePath: req.file.path,
       lat: Number(lat),
@@ -57,7 +66,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
       capturedAt: capturedAt ? new Date(Number(capturedAt)) : null
     });
 
-    console.log(`📸 Foto yüklendi: session=${sessionId}, id=${photo.id}`);
+    console.log(`📸 Foto yüklendi: session=${sessionId}, drone=${resolvedDroneId ?? "?"}, id=${photo.id}`);
     res.status(201).json(photo);
   } catch (err) {
     console.error("❌ Photo upload error:", err.message);

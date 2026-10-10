@@ -3,18 +3,93 @@ const pool = require("../config/database");
 const WaypointPlannerService = require("../services/waypointPlanner.service");
 const ScanRouteModel = require("../models/scanRoute.model");
 const ObstacleModel  = require("../models/obstacle.model");
-const { getIO, getDroneClients, getLastKnownPosition } = require("../socket.io");
+const {
+  getIO, getDrones, resolveCommandTargets, sendToDrone, prepareMissionStart, getLastKnownPosition
+} = require("../socket.io");
 
 const router = express.Router();
+
+// RTH separation — MULTI_DRONE_PROTOCOL.md §6.2
+const RTH_MAX_M            = 120;
+const RTH_MIN_M            = 20;
+const RTH_BASE_OFFSET_M    = 10;  // drone-1: highest mission altitude + 10 m
+const RTH_STEP_M           = 15;  // each further drone +15 m (drone-2: +25 m)
+const RTH_MIN_SEPARATION_M = 10;
+// Takeoff altitude check — §6.1 (to be replaced by the field-measured value)
+const HOME_ALT_WARN_DIFF_M = Number(process.env.HOME_ALT_WARN_DIFF_M) || 3;
+
+function droneIndex(droneId) {
+  const m = /^drone-(\d+)$/.exec(droneId || "");
+  return m ? Math.max(1, Number(m[1])) : 1;
+}
+
+/**
+ * Compute rthHeight for `entry` given the other drones' active missions, or
+ * return an error when separation can't be kept under the 120 m ceiling.
+ */
+function computeRthHeight(entry, missionMaxAltitude) {
+  if (missionMaxAltitude > RTH_MAX_M) {
+    return { error: `Görev irtifası ${missionMaxAltitude} m — üst sınır ${RTH_MAX_M} m` };
+  }
+  const others = getDrones().filter(d => d.droneId !== entry.droneId && d.activeMission);
+  const highest = Math.max(missionMaxAltitude, ...others.map(d => d.activeMission.maxAltitude));
+  const offset = RTH_BASE_OFFSET_M + RTH_STEP_M * (droneIndex(entry.droneId) - 1);
+  const rthHeight = Math.max(RTH_MIN_M, Math.min(RTH_MAX_M, Math.round(highest + offset)));
+
+  const clash = others.find(d => Math.abs(d.activeMission.rthHeight - rthHeight) < RTH_MIN_SEPARATION_M);
+  if (clash) {
+    return {
+      error: `Görev irtifası çok yüksek, RTH ayrımı sağlanamıyor (${entry.droneId} ${rthHeight} m, ` +
+             `${clash.droneId} ${clash.activeMission.rthHeight} m); görev irtifasını düşürün`
+    };
+  }
+  return { rthHeight };
+}
+
+/** Warn (don't block) when two drones took off from noticeably different heights. */
+function homeAltitudeWarning(entry) {
+  const others = getDrones().filter(d => d.droneId !== entry.droneId && d.activeMission);
+  if (others.length === 0) return null;
+  const myAlt = entry.lastTelemetry?.home?.alt;
+  if (typeof myAlt !== "number") return "Kalkış rakımı bilinmiyor — irtifa ayrımı kontrol edilemedi";
+  for (const d of others) {
+    const alt = d.lastTelemetry?.home?.alt;
+    if (typeof alt !== "number") return `${d.droneId} kalkış rakımı bilinmiyor — irtifa ayrımı kontrol edilemedi`;
+    const diff = Math.abs(alt - myAlt);
+    if (diff > HOME_ALT_WARN_DIFF_M) {
+      return `${entry.droneId} ile ${d.droneId} kalkış rakımları ${diff.toFixed(1)} m farklı ` +
+             `(eşik ${HOME_ALT_WARN_DIFF_M} m) — gerçek irtifa ayrımı azalabilir`;
+    }
+  }
+  return null;
+}
+
+/**
+ * A v1 client (old tablet build) ignores mission.rthHeight, so its RTH altitude
+ * is uncontrolled. Refuse missions while a v1 drone shares the sky with another
+ * drone; a lone v1 drone keeps working as before. MULTI_DRONE_PROTOCOL.md §6.2
+ */
+function legacyClientError(entry) {
+  const others = getDrones().filter(d => d.droneId !== entry.droneId && (d.socketId || d.activeMission));
+  if (others.length === 0) return null;
+  const legacy = [entry, ...others].filter(d => d.protocol < 2).map(d => d.droneId);
+  if (legacy.length === 0) return null;
+  return `${legacy.join(", ")} eski uygulama sürümünde (protokol v1) ve RTH irtifasını uygulamıyor — ` +
+         `başka bir drone bağlıyken görev gönderilemez. Tableti v2 sürümüne güncelleyin.`;
+}
+
+function targetErrorStatus(error) {
+  return /bağlı değil|Bağlı drone yok/.test(error) ? 503 : 400;
+}
 
 /**
  * POST /api/mission/plan
  * Compute boustrophedon scan waypoints for an area and optionally persist the route.
  *
- * Body: { areaId, altitudeM?, overlapPercent?, frontOverlapPercent?, speedMs?, saveRoute?, homeLat?, homeLon? }
+ * Body: { areaId, altitudeM?, overlapPercent?, frontOverlapPercent?, speedMs?, saveRoute?, homeLat?, homeLon?, droneId? }
  *
  * homeLat/homeLon (optional): drone's current/takeoff position. If omitted, falls back
- * to the last known position reported by the drone (telemetry or drone_photo). Used to
+ * to the last known position reported by that drone (droneId) or by any drone. Used to
  * orient the route so it starts at whichever end is closest to the drone — it can't be
  * guaranteed the drone is sitting exactly on waypoint 0.
  *
@@ -33,7 +108,8 @@ router.post("/plan", async (req, res) => {
       speedMs             = 8,
       saveRoute           = true,
       homeLat             = null,
-      homeLon             = null
+      homeLon             = null,
+      droneId             = null
     } = req.body;
 
     if (!areaId) {
@@ -51,7 +127,7 @@ router.post("/plan", async (req, res) => {
     const obstacles = await ObstacleModel.getByAreaId(areaId);
 
     // Resolve home position: explicit body value wins, else last known drone fix
-    const lastPos = getLastKnownPosition();
+    const lastPos = getLastKnownPosition(droneId || undefined);
     const resolvedHomeLat = homeLat != null ? Number(homeLat) : (lastPos ? lastPos.lat : null);
     const resolvedHomeLon = homeLon != null ? Number(homeLon) : (lastPos ? lastPos.lon : null);
 
@@ -107,14 +183,17 @@ router.post("/plan", async (req, res) => {
 
 /**
  * POST /api/mission/start
- * Emit a drone_command(waypoint_mission) event to every connected drone client.
+ * Send drone_command(waypoint_mission) to ONE drone (never broadcast).
  *
- * Body: { waypoints, areaId?, areaName?, altitudeM?, speedMs?, savedRouteId? }
+ * Body: { waypoints, droneId?, areaId?, areaName?, altitudeM?, speedMs?, savedRouteId? }
+ * droneId may be omitted only while exactly one drone is connected.
+ * rthHeight is computed here (MULTI_DRONE_PROTOCOL.md §6.2) and sent in mission.rthHeight.
  */
-router.post("/start", (req, res) => {
+router.post("/start", async (req, res) => {
   try {
     const {
       waypoints,
+      droneId      = null,
       areaId,
       areaName,
       altitudeM    = 50,
@@ -125,49 +204,68 @@ router.post("/start", (req, res) => {
     if (!Array.isArray(waypoints) || waypoints.length === 0) {
       return res.status(400).json({ error: "waypoints[] zorunludur" });
     }
+    if (droneId === "all") {
+      return res.status(400).json({ error: "Görev tek bir drone'a gönderilmelidir" });
+    }
 
     const io = getIO();
     if (!io) return res.status(503).json({ error: "Socket.IO henüz başlatılmadı" });
 
-    const droneClients = getDroneClients();
-    if (!droneClients || droneClients.size === 0) {
-      return res.status(503).json({ error: "Bağlı drone yok – Android uygulaması bağlanmamış" });
-    }
+    const { targets, error } = resolveCommandTargets(droneId, "waypoint_mission");
+    if (error) return res.status(targetErrorStatus(error)).json({ error });
+    const entry = targets[0];
+
+    const legacyError = legacyClientError(entry);
+    if (legacyError) return res.status(409).json({ error: legacyError });
+
+    const mappedWaypoints = waypoints.map((wp, i) => ({
+      index:    i,
+      lat:      wp.lat,
+      lon:      wp.lon,
+      altitude: wp.altitude ?? Number(altitudeM),
+      speed:    wp.speed    ?? Number(speedMs),
+      actions:  wp.actions  ?? ["shoot_photo"]
+    }));
+    const maxAltitude = Math.max(...mappedWaypoints.map(wp => Number(wp.altitude)));
+
+    const rth = computeRthHeight(entry, maxAltitude);
+    if (rth.error) return res.status(400).json({ error: rth.error });
+
+    const warning = homeAltitudeWarning(entry);
+    const parsedAreaId = areaId != null && areaId !== "" ? Number(areaId) : null;
+
+    // Records area + mission and re-sends session_started (with areaId) first.
+    await prepareMissionStart(entry, { areaId: parsedAreaId, maxAltitude, rthHeight: rth.rthHeight });
 
     const command = {
       command: "waypoint_mission",
       mission: {
-        areaId,
+        areaId:       parsedAreaId,
         areaName,
         altitude:     Number(altitudeM),
         speed:        Number(speedMs),
+        rthHeight:    rth.rthHeight,
         finishAction: "go_home",      // drone returns home after completion
         headingMode:  "auto",         // heading follows flight path
-        waypoints: waypoints.map((wp, i) => ({
-          index:    i,
-          lat:      wp.lat,
-          lon:      wp.lon,
-          altitude: wp.altitude ?? Number(altitudeM),
-          speed:    wp.speed    ?? Number(speedMs),
-          actions:  wp.actions  ?? ["shoot_photo"]
-        }))
+        waypoints:    mappedWaypoints
       },
       savedRouteId,
       timestamp: Date.now()
     };
 
-    droneClients.forEach(clientId => {
-      io.to(clientId).emit("drone_command", command);
-    });
+    sendToDrone(entry, "drone_command", command);
 
     console.log(
-      `🚁 Waypoint mission gönderildi: ${droneClients.size} drone, ${waypoints.length} WP`
+      `🚁 Waypoint mission gönderildi: ${entry.droneId}, ${waypoints.length} WP, ` +
+      `RTH ${rth.rthHeight} m` + (warning ? ` — ⚠️ ${warning}` : "")
     );
 
     res.json({
-      message:      `Görev ${droneClients.size} drone'a gönderildi`,
+      message:       `Görev ${entry.droneId} için gönderildi`,
+      droneId:       entry.droneId,
       waypointCount: waypoints.length,
-      droneCount:    droneClients.size
+      rthHeight:     rth.rthHeight,
+      warning
     });
 
   } catch (err) {
@@ -178,33 +276,40 @@ router.post("/start", (req, res) => {
 
 /**
  * POST /api/mission/stop
- * Send a stop/RTH command to all connected drones.
+ * Send stop_mission to one drone, or to every drone with droneId "all".
+ *
+ * Body: { droneId? } — may be omitted only while exactly one drone is connected.
  */
 router.post("/stop", (req, res) => {
   const io = getIO();
   if (!io) return res.status(503).json({ error: "Socket.IO başlatılmamış" });
 
-  const droneClients = getDroneClients();
-  if (!droneClients || droneClients.size === 0) {
-    return res.status(503).json({ error: "Bağlı drone yok" });
-  }
+  const { targets, error } = resolveCommandTargets(req.body?.droneId ?? null, "stop_mission");
+  if (error) return res.status(targetErrorStatus(error)).json({ error });
 
   const command = { command: "stop_mission", timestamp: Date.now() };
-  droneClients.forEach(id => io.to(id).emit("drone_command", command));
+  targets.forEach(entry => sendToDrone(entry, "drone_command", command));
 
-  console.log(`🛑 stop_mission gönderildi: ${droneClients.size} drone`);
-  res.json({ message: "Görev durdurma komutu gönderildi", droneCount: droneClients.size });
+  const droneIds = targets.map(t => t.droneId);
+  console.log(`🛑 stop_mission gönderildi: ${droneIds.join(", ")}`);
+  res.json({ message: "Görev durdurma komutu gönderildi", droneCount: targets.length, droneIds });
 });
 
 /**
  * GET /api/mission/status
- * Returns connected drone count and socket readiness.
+ * Returns connected drones and socket readiness.
  */
 router.get("/status", (req, res) => {
-  const droneClients = getDroneClients();
+  const drones = getDrones().filter(d => d.socketId);
   res.json({
     socketReady:     !!getIO(),
-    connectedDrones: droneClients ? droneClients.size : 0
+    connectedDrones: drones.length,
+    drones: drones.map(d => ({
+      droneId:   d.droneId,
+      sessionId: d.session ? d.session.id : null,
+      areaId:    d.activeAreaId,
+      rthHeight: d.activeMission ? d.activeMission.rthHeight : null
+    }))
   });
 });
 

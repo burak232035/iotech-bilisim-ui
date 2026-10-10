@@ -88,6 +88,7 @@ export const SOCKET_EVENTS = {
   SESSION_INFO:     'session_info',
   SESSION_STARTED:  'session_started',
   SESSION_ENDED:    'session_ended',
+  DRONES_STATE:     'drones_state',
   MISSION_PROGRESS: 'mission_progress',
   MISSION_COMPLETE: 'mission_complete',
   MISSION_STOPPED:  'mission_stopped',

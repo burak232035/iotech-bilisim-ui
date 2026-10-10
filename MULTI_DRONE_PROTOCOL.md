@@ -1,0 +1,359 @@
+# Çoklu Drone Protokolü (Socket.IO, protokol v2)
+
+> **Durum (Ekim 2026):** Android (drone-2 / Redmi) protokol v2'yi tamamladı.
+> **Backend uygulandı** ve test sunucusunda (port 3002) simülasyonla
+> doğrulandı. **Dashboard henüz çoklu drone'a uyarlanmadı:** drone seçici
+> yok, bu yüzden iki drone bağlıyken dashboard'dan gönderilen hedefsiz
+> komutlar backend tarafından reddedilir (hiçbir drone'a gitmez). İlk saha
+> testleri tek drone ile yapılmalıdır.
+
+Bu doküman, iki (veya daha fazla) DJI Mini 4 Pro'nun aynı anda, her biri ayrı
+bir Android cihaz + kumanda üzerinden tek bir backend'e bağlanması için
+Android ↔ backend arasındaki sözleşmedir. Var olan tek-drone protokolü
+(`ANDROID_AI_PROMPT.md`) geçerliliğini korur; burada yalnızca değişen ve
+eklenen kısımlar yer alır.
+
+## 1. Genel ilkeler
+
+- **Tek kod tabanı, tek APK.** Her iki cihaz aynı uygulamayı çalıştırır;
+  fark yalnızca `droneId` ayarıdır. `applicationId` değiştirilmez (DJI app
+  key paket adına bağlıdır).
+- **Tek backend, tek veritabanı, tek dashboard.** Hangi komutun hangi drone'a
+  gideceğine ve alanın nasıl bölüneceğine backend karar verir.
+- **Geriye uyumluluk.** `protocol` alanı göndermeyen istemci eski sürüm (v1)
+  sayılır ve `drone-1` kabul edilir. Geçiş boyunca eski tablet sürümü
+  çalışmaya devam eder.
+- **Kimliğin esas kaynağı socket eşlemesidir.** Payload'daki `droneId` ek
+  doğrulama içindir; uyuşmazsa uyarı log'lanır, socket eşlemesi geçerli sayılır.
+
+## 2. Bağlantı ve kimlik
+
+### 2.1 `register` (Android → backend)
+
+```json
+{
+  "role": "drone",
+  "protocol": 2,
+  "droneId": "drone-2",
+  "serial": "<DJI seri no>",
+  "lastSessionId": 42
+}
+```
+
+| Alan | Zorunlu | Açıklama |
+| --- | --- | --- |
+| `role` | Evet | `"drone"` |
+| `protocol` | v2'de evet | Yoksa istemci v1 sayılır |
+| `droneId` | v2'de evet | `drone-1`, `drone-2`, … Yoksa `drone-1` |
+| `serial` | v2'de evet | DJI seri numarası |
+| `lastSessionId` | Hayır | Android'in bildiği son oturum (bkz. §4) |
+
+Backend `droneId → socket.id` eşlemesini tutar ve socket'i `drone:<droneId>`
+odasına alır. Android her (yeniden) bağlantıda `register`'ı tekrar gönderir.
+
+### 2.2 Aynı `droneId` ile ikinci bağlantı
+
+| Durum | Davranış |
+| --- | --- |
+| Seri numarası **aynı** (aynı cihaz yeniden bağlanıyor) | Yeni bağlantı geçerli olur; eski socket sunucu tarafından sessizce kapatılır. |
+| Seri numarası **farklı** (ayar hatası) | **Eski bağlantı korunur, yeni bağlantı reddedilir.** |
+| Seri numarası yok (v1 istemci) | Aynı cihaz sayılır. |
+| Seri numarası yok (v2 istemci, uygulama drone'dan önce bağlandı) | Socket **beklemeye** alınır: komut almaz, oturum açılmaz, kimseyi düşürmez. Aynı socket'ten seri numaralı `register` gelince yukarıdaki kurallar uygulanır. |
+
+Aynı socket'ten gelen ikinci `register` (ör. önce seri numarasız, drone
+bağlanınca seri numaralı) bir güncellemedir: aynı oturum devam eder, seri
+numarası oturuma işlenir, `session_started` aynı `sessionId` ile tekrar gönderilir.
+
+Reddedilen socket'e gönderilir, ardından sunucu `socket.disconnect(true)` çağırır:
+
+```json
+// event: "register_rejected"
+{ "reason": "droneId_in_use", "droneId": "drone-1", "activeSerial": "<seri>" }
+```
+
+Sunucu tarafından kesilen bağlantıda Socket.IO istemcisi kendiliğinden yeniden
+bağlanmaz. Android elle yeniden bağlanmamalı ve ekranda belirgin bir uyarı
+göstermelidir ("Bu droneId başka bir cihazda kullanılıyor").
+
+Bu kural, yanlış ayarlanmış bir cihazın uçmakta olan bir drone'un backend
+bağlantısını koparmasını önlemek için seçilmiştir.
+
+## 3. Backend → Android komutları
+
+### 3.1 Yapı
+
+Tüm komutlar **`drone_command` olayı içinde** gelir; yeni olay eklenmez.
+`droneId` en üst seviyede, `command` ile yan yanadır:
+
+```json
+{ "command": "takeoff", "droneId": "drone-2", "timestamp": 1760000000000 }
+```
+
+- Backend komutu yalnızca hedef drone'un odasına gönderir.
+- Android, kendi kimliğiyle eşleşmeyen `droneId` taşıyan komutu **reddeder**
+  ve log'lar.
+- `data_request` için de aynı kurallar geçerlidir.
+
+### 3.2 Hedefsiz komutlar (geçiş dönemi)
+
+Web'den `droneId` olmadan bir komut gelirse:
+- Tek drone bağlıysa o drone'a gider (bugünkü davranış).
+- Birden fazla drone bağlıysa **komut reddedilir**, web'e hata döner.
+  Komut asla tüm drone'lara birden gönderilmez.
+
+### 3.3 "Tüm drone'lar" hedefi
+
+Web `droneId: "all"` gönderebilir, **yalnızca** şu komutlar için:
+`emergency_land`, `returnHome`, `stop_mission`. Diğer komutlarda `"all"`
+reddedilir.
+
+> **`hover` geçici olarak listeden çıkarıldı.** Android'de `hover` şu an
+> çalışan bir waypoint görevini durdurmuyor, yalnızca manuel joystick
+> modunu kapatıyor. Görev sırasında gelen `emergency_land` davranışı da
+> henüz netleşmedi. Android bunları düzeltene kadar backend `"all" → hover`
+> komutunu reddeder ve dashboard'a "Tümü → hover" butonu eklenmez. Düzeltme
+> gelince `hover` listeye geri alınacak.
+
+Backend `"all"` değerini Android'e iletmez; komutu her drone'a **o drone'un
+kendi `droneId`'si ile** ayrı ayrı gönderir. Böylece §3.1'deki eşleşme
+kontrolü bu komutlarda da çalışır.
+
+### 3.4 `waypoint_mission`
+
+Mevcut format korunur; `droneId` ve iki yeni alan eklenir:
+
+```json
+{
+  "command": "waypoint_mission",
+  "droneId": "drone-2",
+  "mission": {
+    "areaId": 7,
+    "areaName": "Teknokent",
+    "altitude": 60,
+    "speed": 8,
+    "rthHeight": 85,
+    "finishAction": "go_home",
+    "headingMode": "auto",
+    "waypoints": [
+      { "index": 0, "lat": 38.6815, "lon": 39.2205, "altitude": 60, "speed": 8, "actions": ["shoot_photo"] }
+    ]
+  },
+  "savedRouteId": null,
+  "timestamp": 1760000000000
+}
+```
+
+- `mission.areaId` görev için esas kaynaktır (ayrıca bkz. §4.2).
+- `mission.rthHeight`: Android bunu görev başlamadan önce drone'a yazar.
+  **Çoklu drone görevinde `rthHeight` yoksa Android görevi başlatmamalı ve
+  hata dönmelidir** (sabit varsayılan değer kullanılmaz; bkz. §6.2).
+
+`stop_mission` de aynı şekilde `drone_command` içinde, `droneId` ile gelir.
+
+## 4. Oturumlar
+
+### 4.1 Her drone'un ayrı oturumu
+
+Her drone'un kendi uçuş oturumu (`flight_sessions` kaydı) vardır. Bir
+drone'un kopması diğerinin oturumunu etkilemez. Aynı alanı bölüşen iki drone
+aynı `areaId`'yi, farklı `sessionId`'leri taşır.
+
+### 4.2 `session_started` (backend → Android)
+
+Yalnızca ilgili drone'un odasına, iki durumda gönderilir:
+
+| Ne zaman | Payload |
+| --- | --- |
+| Register sırasında | `{ sessionId, droneId, startTime, areaId }` |
+| Görev başlarken, `waypoint_mission`'dan **hemen önce** | `{ sessionId, droneId, startTime, areaId }` — aynı `sessionId` |
+
+- Register sırasında, kaldığı yerden devam eden bir oturumda görev zaten
+  başlamışsa gerçek `areaId` gönderilir; henüz görev yoksa `areaId: null`.
+- Android'in `session_started` işleyicisi olayı birden fazla kez almaya
+  dayanıklı olmalıdır (değerleri yalnızca günceller).
+- Geçiş döneminde `areaId` hem `session_started` hem `mission.areaId` içinde
+  gönderilir.
+
+### 4.3 Oturumun devam etmesi
+
+Register'da `lastSessionId` gelirse ve o oturum hâlâ açıksa ve aynı drone'a
+aitse, **kopma süresi ne olursa olsun aynı oturum devam eder.** DJI görevi
+bağlantı kopsa da drone üzerinde devam ettiği için bu gereklidir.
+
+### 4.4 Oturumun kapanması
+
+Oturum bağlantı koptuğu anda **kapanmaz.** Kapanma koşulları, öncelik sırasıyla:
+
+1. `isFlying` varsa: `mission_complete` gönderildikten sonra `isFlying`
+   `true` → `false` olur ve 60 sn boyunca `false` kalır.
+2. `isFlying` yoksa (v1 istemci): `mission_complete` gönderildikten sonra
+   `altitude.agl` 60 sn boyunca 1,5 m'nin altında kalır.
+3. Son çare: drone 30 dakika boyunca bağlanmaz.
+
+Fotoğraf yükleme kapalı oturumlara da kabul edilir; iniş sonrası toplu
+yükleme oturum kapanmış olsa bile doğru oturuma gider.
+
+## 5. Android → backend olayları
+
+### 5.1 Tüm olaylara `droneId`
+
+Şu olayların payload'ına `droneId` eklenir:
+`drone_telemetry`, `data_response`, `command_response`, `mission_progress`,
+`mission_complete`, `mission_stopped`, `drone_photo`, `photo_upload_status`.
+
+### 5.2 Telemetri (v2 ek alanları)
+
+Mevcut alanlar (`battery`, `gimbal`, `altitude`, `gps`, `lat`, `lon`,
+`timestamp`) aynen kalır. Eklenenler:
+
+| Alan | Tip | Kaynak / açıklama |
+| --- | --- | --- |
+| `droneId` | string | |
+| `heading` | number, derece | Drone'un pusula yönü (gimbal yaw değil) |
+| `speed` | number, m/s | Yer hızı |
+| `flightMode` | string | DJI enum adı olduğu gibi: `GPS_NORMAL`, `WAYPOINT`, `GO_HOME`, `AUTO_LANDING`, … |
+| `isFlying` | boolean | |
+| `home.lat`, `home.lon` | number, derece | `FlightControllerKey.KeyHomeLocation` |
+| `home.alt` | number, m | `FlightControllerKey.KeyTakeoffLocationAltitude` — her kalkışta yenilenir |
+
+Dashboard tüm v2 alanlarını **isteğe bağlı** kabul eder; v1 istemciden
+gelmemeleri hata üretmez:
+- `heading` yoksa drone yön oku olmadan gösterilir.
+- `speed` yoksa "—" gösterilir.
+- `home` yoksa kalkış noktası işaretlenmez; kalkış rakımı kontrolü yapılamaz,
+  "kalkış rakımı bilinmiyor" uyarısı gösterilir, görev engellenmez.
+- `flightMode` yoksa mod gösterilmez; tanınmayan değer ham haliyle gösterilir.
+
+### 5.3 Fotoğraf yükleme (HTTP)
+
+`POST /api/photos/upload` multipart formuna `droneId` alanı eklenir.
+Oturum zaten drone'a özel olduğu için zorunlu değildir; doğrulama için kullanılır.
+
+Ortomozaik **alan bazında birleşik** oluşturulur: aynı alanı tarayan iki
+drone'un fotoğrafları tek haritada birleştirilir. Oturum bazında üretim de
+mümkün olmaya devam eder.
+
+## 6. Uçuş güvenliği
+
+Ana güvenlik önlemi **iki drone'un ayrı alanları taramasıdır.** İrtifa ve RTH
+ayrımı, özellikle kalkış, iniş ve alana gidiş-dönüş sırasındaki çakışmalara
+karşı ek önlemdir.
+
+### 6.1 Görev irtifası
+
+- Waypoint irtifaları **kalkış noktasına göredir** (göreceli).
+- Varsayılan olarak `drone-2`, `drone-1`'den **10 m yukarıda** uçar (ayarlanabilir).
+- Fotoğraf örtüşmesi ve waypoint aralığı her drone için kendi irtifasına göre
+  ayrı hesaplanır.
+- **Operasyon kuralı:** iki drone aynı seviyeden kalkar.
+- **Kontrol:** backend iki drone'un `home.alt` değerlerini karşılaştırır; fark
+  eşiği aşarsa dashboard görev başlatılmadan önce uyarı gösterir. Eşik
+  ayarlanabilir; varsayılan **3 m**, saha ölçümünden sonra güncellenecek
+  (GPS dikey hatası birkaç metreyi bulabilir).
+
+### 6.2 RTH irtifası
+
+Backend her drone için `mission.rthHeight` hesaplar:
+
+- `drone-1`: iki görevin en yüksek irtifası + 10 m
+- `drone-2`: iki görevin en yüksek irtifası + 25 m
+- Üst sınır 120 m.
+
+Örnek: görevler 50 m ve 60 m → RTH 70 m ve 85 m.
+
+RTH değerleri 120 m sınırına takılıp aradaki fark 10 m'nin altına düşerse
+**görev planlama aşamasında reddedilir** ("Görev irtifası çok yüksek, RTH
+ayrımı sağlanamıyor; görev irtifasını düşürün"). Mevcut formülle bu, en yüksek
+görev irtifasının en fazla 95 m olabileceği anlamına gelir.
+
+Sabit RTH değerleri (ör. 40 / 55 m) kullanılmaz: drone, RTH irtifasından
+yüksekte uçuyorsa eve bulunduğu irtifada döner ve ayrım kaybolur.
+
+### 6.3 Eski (v1) istemci
+
+Eski tablet sürümü (v1) `mission.rthHeight`'ı uygulamaz; RTH irtifası
+kontrolsüz kalır. Bu yüzden backend, **bağlı ya da görevi süren başka bir
+drone varken** taraflardan biri v1 ise görevi reddeder (HTTP 409, "eski
+uygulama sürümünde … tableti v2 sürümüne güncelleyin"). Tek başına bağlı bir
+v1 drone bugünkü gibi görev alabilir. Kalıcı çözüm: tablet de v2'ye geçecek.
+
+## 7. Alan bölme
+
+| Aşama | Davranış |
+| --- | --- |
+| 1 | Her drone'a dashboard'dan ayrı alan seçilir, ayrı görev gönderilir. |
+| 2 | Tek alan backend tarafından otomatik olarak şeritlere bölünür; her drone kendi şeridini tarar. |
+
+Her iki aşamada da her drone kendi `waypoint_mission` komutunu kendi
+waypoint listesiyle alır. Eski arayüzün `start_area_scan` komutu kullanılmaz.
+
+## 8. Dashboard
+
+- Drone seçici; komutlar seçili drone'a gider.
+- Acil durum butonlarında ek "Tümü" seçeneği (§3.3) — `hover` hariç.
+- Haritada her drone farklı renkte, varsa yön oku ve kalkış noktasıyla.
+
+## 9. Test ortamı
+
+| | Canlı | Test |
+| --- | --- | --- |
+| Port | 3001 | 3002 |
+| Veritabanı | `drone_tracking` | `drone_tracking_test` |
+
+Android'de sunucu adresi bir build ayarından gelir; test sürümü 3002'ye bağlanır.
+
+```bash
+npm run setup-db:test                       # test veritabanını bir kez oluşturur
+npm run start:test                          # backend → http://<bilgisayar-ip>:3002
+npm --prefix drone-frontend-react run dev:test   # dashboard → http://localhost:3010 (test sunucusuna bağlı)
+```
+
+## 10. Açık maddeler
+
+- [x] **Port 5000 YOLO servisi:** Android'deki `DroneFrameSender` canlı FPV
+      karelerini `<sunucu-ip>:5000/detect` adresine gönderiyordu; servis bu
+      projede yok. Android'de `ENABLE_FRAME_SENDER=false` build ayarıyla kapatıldı.
+- [ ] **Android `hover` / `emergency_land` görev sırasında:** `hover` çalışan
+      görevi durdurmuyor, `emergency_land` davranışı belirsiz; Android düzeltiyor.
+      Düzelince `hover` "all" listesine geri alınacak (§3.3).
+- [ ] **Tablet v2'ye geçecek** (§6.3).
+- [ ] **Kalkış rakımı eşiği:** iki drone yan yana konup sahada ölçülecek,
+      gerçekçi eşik değeri backend'e iletilecek (§6.1).
+
+## 11. Yapılacaklar
+
+### Android
+
+- [x] `register`'a `protocol`, `droneId`, `serial`, `lastSessionId` (+ `appVersion`)
+- [x] Gelen komutlarda `droneId` kontrolü (uyuşmazsa `command_response` `status: "rejected"`)
+- [x] `register_rejected` işleme (yeniden bağlanmama + uyarı)
+- [x] `session_started`'ın tekrar alınmasına dayanıklılık
+- [x] Giden tüm olaylara `droneId` (§5.1)
+- [x] Telemetriye `heading`, `speed`, `flightMode`, `isFlying`, `home`
+- [x] `mission.rthHeight`'ı görev öncesi drone'a yazma; yoksa görevi başlatmama (geçerli aralık 20–120 m)
+- [x] Foto yüklemeye `droneId`
+- [x] Sunucu adresi için build ayarı (canlı / test)
+- [x] Port 5000 gönderimini kapatan build ayarı (`ENABLE_FRAME_SENDER=false`)
+- [ ] `hover`'ın çalışan görevi durdurması; görev sırasında `emergency_land` davranışı (§3.3)
+- [ ] Tablet (drone-1) sürümünün v2'ye geçmesi (§6.3)
+
+### Backend
+
+- [x] Port 3002 + `drone_tracking_test` test kurulumu (`npm run setup-db:test`, `npm run start:test`)
+- [x] `droneId` eşlemesi, odalar, §2.2 kuralları
+- [x] Komutları hedefli gönderme (`socket.io.js`, `mission.routes.js` `/start` ve `/stop`)
+- [x] `"all"` hedefinin drone başına dağıtılması
+- [x] Drone başına oturum, `lastSessionId` ile devam, §4.4 kapanma kuralları
+- [x] `session_started`'a `droneId` ve `areaId`; görev öncesi tekrar gönderim
+- [x] Veritabanı: `flight_sessions.drone_id`, `flight_sessions.drone_serial`, `photos.drone_id` (başlangıçta otomatik migration)
+- [x] RTH hesaplama, 120 m kontrolü, kalkış rakımı uyarısı (eşik: `HOME_ALT_WARN_DIFF_M`, varsayılan 3)
+- [x] Başka drone varken v1 istemciye/istemciyle görevin reddi (§6.3)
+- [x] `"all" → hover` geçici olarak kapalı (§3.3)
+- [ ] `drone-2` için varsayılan +10 m görev irtifası (planlama/dashboard ile birlikte)
+- [ ] Alan bazında birleşik ortomozaik
+
+### Dashboard
+
+- [ ] Drone seçici, "Tümü" acil butonları
+- [ ] Çoklu drone harita gösterimi, isteğe bağlı v2 alanları
+- [ ] Görev planlamada drone seçimi, irtifa/RTH uyarıları

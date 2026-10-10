@@ -4,14 +4,42 @@
     {
       "name": "backend",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["backend/app.js"],
+      "runtimeArgs": [
+        "backend/app.js"
+      ],
       "port": 3001
+    },
+    {
+      "name": "backend-test",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "-r",
+        "./backend/test-env.js",
+        "backend/app.js"
+      ],
+      "port": 3002
     },
     {
       "name": "frontend-react",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "drone-frontend-react", "run", "dev"],
+      "runtimeArgs": [
+        "--prefix",
+        "drone-frontend-react",
+        "run",
+        "dev"
+      ],
       "port": 3000
+    },
+    {
+      "name": "frontend-test",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "drone-frontend-react",
+        "run",
+        "dev:test"
+      ],
+      "port": 3010
     }
   ]
 }

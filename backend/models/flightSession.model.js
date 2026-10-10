@@ -3,19 +3,50 @@ const pool = require("../config/database");
 class FlightSessionModel {
   /**
    * Create new flight session
-   * @param {Object} data - {area_id, start_time, start_coordinates}
+   * @param {Object} data - {area_id, start_time, start_coordinates, drone_id, drone_serial}
    * @returns {Promise<Object>}
    */
   static async createSession(data) {
-    const { area_id, start_time, start_coordinates } = data;
+    const { area_id, start_time, start_coordinates, drone_id, drone_serial } = data;
     const result = await pool.query(
-      `INSERT INTO flight_sessions (area_id, start_time, start_coordinates, status)
-       VALUES ($1, $2, $3, 'active')
+      `INSERT INTO flight_sessions (area_id, start_time, start_coordinates, status, drone_id, drone_serial)
+       VALUES ($1, $2, $3, 'active', $4, $5)
        RETURNING *`,
-      [area_id || null, start_time || new Date(), JSON.stringify(start_coordinates || {})]
+      [
+        area_id || null, start_time || new Date(), JSON.stringify(start_coordinates || {}),
+        drone_id || null, drone_serial || null
+      ]
     );
     console.log(`✅ Flight session created: ID ${result.rows[0].id}`);
     return result.rows[0];
+  }
+
+  /**
+   * Link a session to the area its mission scans.
+   * @param {number} sessionId
+   * @param {number} areaId
+   * @returns {Promise<Object|null>}
+   */
+  static async setArea(sessionId, areaId) {
+    const result = await pool.query(
+      `UPDATE flight_sessions SET area_id = $1 WHERE id = $2 RETURNING *`,
+      [areaId, sessionId]
+    );
+    return result.rows[0] || null;
+  }
+
+  /**
+   * Record the DJI serial once it's known (the app may register before the aircraft connects).
+   * @param {number} sessionId
+   * @param {string} serial
+   * @returns {Promise<Object|null>}
+   */
+  static async setDroneSerial(sessionId, serial) {
+    const result = await pool.query(
+      `UPDATE flight_sessions SET drone_serial = $1 WHERE id = $2 RETURNING *`,
+      [serial, sessionId]
+    );
+    return result.rows[0] || null;
   }
 
   /**

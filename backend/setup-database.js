@@ -3,6 +3,14 @@ const fs = require("fs");
 const path = require("path");
 require("dotenv").config({ path: __dirname + "/.env" });
 
+// DB_NAME selects the database (test instance: drone_tracking_test).
+// Identifier is validated because CREATE DATABASE can't take a bind parameter.
+const DB_NAME = process.env.DB_NAME || "drone_tracking";
+if (!/^[a-z_][a-z0-9_]*$/.test(DB_NAME)) {
+  console.error(`❌ Invalid DB_NAME: ${DB_NAME}`);
+  process.exit(1);
+}
+
 async function setupDatabase() {
   console.log("🔧 PostgreSQL Database Setup");
   console.log("================================\n");
@@ -25,12 +33,12 @@ async function setupDatabase() {
     console.log("2️⃣ Checking if database exists...");
     const dbCheck = await adminClient.query(
       "SELECT 1 FROM pg_database WHERE datname = $1",
-      ["drone_tracking"]
+      [DB_NAME]
     );
 
     if (dbCheck.rows.length === 0) {
-      console.log("📦 Creating database 'drone_tracking'...");
-      await adminClient.query("CREATE DATABASE drone_tracking");
+      console.log(`📦 Creating database '${DB_NAME}'...`);
+      await adminClient.query(`CREATE DATABASE ${DB_NAME}`);
       console.log("✅ Database created\n");
     } else {
       console.log("✅ Database already exists\n");
@@ -39,11 +47,11 @@ async function setupDatabase() {
     await adminClient.end();
 
     // Now connect to our new database and run schema
-    console.log("3️⃣ Connecting to drone_tracking database...");
+    console.log(`3️⃣ Connecting to ${DB_NAME} database...`);
     const dbClient = new Client({
       host: process.env.DB_HOST || "localhost",
       port: process.env.DB_PORT || 5432,
-      database: "drone_tracking",
+      database: DB_NAME,
       user: process.env.DB_USER || "postgres",
       password: process.env.DB_PASSWORD || "postgres"
     });

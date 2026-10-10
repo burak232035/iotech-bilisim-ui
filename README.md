@@ -148,6 +148,7 @@ Alan, oturum, görev, telemetri ve rapor uç noktaları da `backend/routes/` alt
 - [`ANDROID_MOSAIC_UPDATE.md`](ANDROID_MOSAIC_UPDATE.md) — ortomozaik değişikliklerinin Android'e etkisi
 - [`ANDROID_DRONE_COMMAND_GUIDE.md`](ANDROID_DRONE_COMMAND_GUIDE.md) — drone komut rehberi
 - [`DRONE_WEBSOCKET_API.md`](DRONE_WEBSOCKET_API.md) — WebSocket olayları
+- [`MULTI_DRONE_PROTOCOL.md`](MULTI_DRONE_PROTOCOL.md) — iki drone'u eş zamanlı yönetme protokolü (taslak)
 - [`WAYPOINT_TEST_CHECKLIST.md`](WAYPOINT_TEST_CHECKLIST.md) — canlı uçuş test listesi
 - [`PROJECT_HANDOFF_PROMPT.md`](PROJECT_HANDOFF_PROMPT.md) — proje durumu ve geçmişi
 

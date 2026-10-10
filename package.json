@@ -4,6 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "start": "node backend/app.js",
+    "start:test": "node -r ./backend/test-env.js backend/app.js",
+    "setup-db": "node backend/setup-database.js",
+    "setup-db:test": "node -r ./backend/test-env.js backend/setup-database.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
