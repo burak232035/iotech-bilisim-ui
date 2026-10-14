@@ -3,6 +3,7 @@ const pool = require("../config/database");
 const OrthomosaicModel = require("../models/orthomosaic.model");
 const OrthomosaicService = require("../services/orthomosaic.service");
 const PhotoModel = require("../models/photo.model");
+const FlightSessionModel = require("../models/flightSession.model");
 
 const router = express.Router();
 
@@ -18,9 +19,12 @@ router.post("/sessions/:id/generate", async (req, res) => {
   try {
     const photos = await PhotoModel.getBySession(sessionId);
     if (photos.length < 3) {
+      const session = await FlightSessionModel.getById(sessionId);
+      const who = session?.drone_id ? `${session.drone_id}, ` : "";
       return res.status(400).json({
-        error: `Ortomozaik için en az 3 tam-çözünürlük fotoğraf gerekli, bu session'da ${photos.length} var. ` +
-               `(Android'in iniş-sonrası yükleme akışı — ANDROID_AI_PROMPT.md §17 — çalıştırıldı mı?)`
+        error: `Ortomozaik için en az 3 tam çözünürlüklü fotoğraf gerekli; ${who}oturum ${sessionId} için ` +
+               `sunucuya ${photos.length} fotoğraf yüklenmiş. Haritadaki önizlemeler sayılmaz — ` +
+               `Android'in iniş sonrası fotoğraf yüklemesi tamamlandı mı?`
       });
     }
 
