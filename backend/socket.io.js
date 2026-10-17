@@ -1,6 +1,7 @@
 const { Server } = require("socket.io");
 const TelemetryService = require("./services/telemetry.service");
 const FlightSessionModel = require("./models/flightSession.model");
+const { saveLivePhoto } = require("./services/livePhoto.service");
 
 /*
  * Multi-drone Socket.IO hub — protocol v2, see MULTI_DRONE_PROTOCOL.md.
@@ -587,6 +588,12 @@ function initializeSocketIO(httpServer) {
       const entry = drones.get(stamped.droneId);
       if (entry) updatePosition(entry, data.lat, data.lon);
       emitToWeb("drone_photo", stamped);
+
+      // Keep the preview (uploads/live/<DD.MM>/ + live_photos) — fire and forget
+      saveLivePhoto(data, {
+        droneId: stamped.droneId ?? null,
+        sessionId: entry ? (entry.session?.id ?? entry.lastSessionId ?? null) : null
+      });
     });
 
     // Handle disconnection — a drone's session is NOT ended here; it ends on

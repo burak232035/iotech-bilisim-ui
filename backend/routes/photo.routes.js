@@ -5,6 +5,8 @@ const path = require("path");
 
 const PhotoModel = require("../models/photo.model");
 const FlightSessionModel = require("../models/flightSession.model");
+const LivePhotoModel = require("../models/livePhoto.model");
+const { livePhotoUrl } = require("../services/livePhoto.service");
 const WasteDetectionModel = require("../models/wasteDetection.model");
 const WasteDetectionService = require("../services/wasteDetection.service");
 
@@ -39,6 +41,32 @@ const upload = multer({
  * multipart/form-data: file + sessionId, areaId?, lat, lon, altitude?, heading?, capturedAt?, droneId?
  * droneId is optional (the session already belongs to one drone); a mismatch is only logged.
  */
+/**
+ * GET /api/photos/live?day=17.10&droneId=drone-1&sessionId=11
+ * Stored live map previews (drone_photo), oldest first. All filters optional.
+ */
+router.get("/live", async (req, res) => {
+  try {
+    const rows = await LivePhotoModel.list({
+      day: req.query.day || undefined,
+      droneId: req.query.droneId || undefined,
+      sessionId: req.query.sessionId ? Number(req.query.sessionId) : undefined
+    });
+    res.json(rows.map(r => ({ ...r, url: livePhotoUrl(r) })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** GET /api/photos/live/summary — preview counts per day / drone / session */
+router.get("/live/summary", async (req, res) => {
+  try {
+    res.json(await LivePhotoModel.summary());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post("/upload", upload.single("file"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "file zorunludur" });
