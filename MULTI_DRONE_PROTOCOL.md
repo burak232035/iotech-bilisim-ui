@@ -267,6 +267,46 @@ gelmemeleri hata üretmez:
 `POST /api/photos/upload` multipart formuna `droneId` alanı eklenir.
 Oturum zaten drone'a özel olduğu için zorunlu değildir; doğrulama için kullanılır.
 
+**Konum ve yön fotoğrafın kendisinden okunur.** Backend, DJI'ın her fotoğrafa
+yazdığı XMP bilgisini okur ve form alanları yerine bunu kullanır:
+
+| Kayıt | XMP alanı | Form alanı (yedek) |
+| --- | --- | --- |
+| Konum | `drone-dji:GpsLatitude` / `GpsLongitude` | `lat` / `lon` |
+| İrtifa (kalkışa göre) | `drone-dji:RelativeAltitude` | `altitude` |
+| Yön | `drone-dji:GimbalYawDegree` (çekim anındaki gerçek kamera yönü) | `heading` |
+
+Böylece dönüş sırasında çekilen fotoğrafların yönü doğru kaydedilir (17.10'da
+95 fotoğrafın 15'inde gönderilen yön gerçek kamera yönünden 20°+ farklıydı).
+`lat`/`lon` artık **isteğe bağlıdır**; yalnızca fotoğrafta DJI GPS bilgisi
+yoksa zorunludur.
+
+**Android'in iniş sonrası yükleme davranışı (17.10'dan itibaren):** inişten
+sonra 10 sn bekler; drone dosya erişimini reddederse 5 sn arayla 3 kez daha
+dener. Dördü de başarısızsa `photo_upload_status` ile "Foto yükleme başarısız:
+drone dosya erişimine izin vermedi (4 deneme)" gönderir.
+
+### 5.4 `retry_photo_upload` (backend → Android)
+
+SD karttaki fotoğrafları sonradan yüklemek için. Drone yerde ve cihaza bağlıyken gönderilir.
+
+```json
+{ "command": "retry_photo_upload", "droneId": "drone-1" }
+```
+Yalnızca bu kadarı, son görevin yarım kalan yüklemesini sürdürür (uygulama son görevi hatırlar).
+
+```json
+{ "command": "retry_photo_upload", "droneId": "drone-1",
+  "sessionId": 11, "areaId": 5,
+  "from": 1792239193762, "to": 1792240247531,
+  "waypoints": [ { "lat": 0, "lon": 0, "altitude": 0 } ] }
+```
+Eski bir oturum için: uygulama SD karttan yalnızca `from`–`to` (ms) aralığında
+çekilen fotoğrafları seçer ve `sessionId`'ye yükler. `waypoints` görevdeki sırayla
+konum eşleştirmesi içindir; backend konumu fotoğrafın XMP'sinden okuduğu için
+**boş gönderilebilir** (`[]`) — görev noktaları kaybolmuş oturumlar da kurtarılabilir.
+Yanıt `command_response` (`started` / `failed`), ilerleme `photo_upload_status` ile gelir.
+
 Ortomozaik **alan bazında birleşik** oluşturulur: aynı alanı tarayan iki
 drone'un fotoğrafları tek haritada birleştirilir. Oturum bazında üretim de
 mümkün olmaya devam eder.

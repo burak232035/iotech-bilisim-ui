@@ -7,6 +7,7 @@ const PhotoModel = require("../models/photo.model");
 const FlightSessionModel = require("../models/flightSession.model");
 const LivePhotoModel = require("../models/livePhoto.model");
 const { livePhotoUrl, saveLivePhoto } = require("../services/livePhoto.service");
+const { readDjiXmp } = require("../services/djiMetadata.service");
 const WasteDetectionModel = require("../models/wasteDetection.model");
 const WasteDetectionService = require("../services/wasteDetection.service");
 
@@ -38,7 +39,9 @@ const upload = multer({
 /**
  * POST /api/photos/upload
  * Android'in iniş sonrası SD karttaki orijinal fotoğrafı yüklediği endpoint.
- * multipart/form-data: file + sessionId, areaId?, lat, lon, altitude?, heading?, capturedAt?, droneId?
+ * multipart/form-data: file + sessionId, areaId?, lat?, lon?, altitude?, heading?, capturedAt?, droneId?
+ * Position/altitude/heading come from the photo's DJI XMP when present (the
+ * form values are a fallback); lat/lon are required only if the photo has none.
  * droneId is optional (the session already belongs to one drone); a mismatch is only logged.
  */
 /**
@@ -90,8 +93,20 @@ router.post("/upload", upload.single("file"), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "file zorunludur" });
 
     const { sessionId, areaId, lat, lon, altitude, heading, capturedAt, droneId } = req.body;
-    if (!sessionId || lat === undefined || lon === undefined) {
-      return res.status(400).json({ error: "sessionId, lat, lon zorunludur" });
+    if (!sessionId) {
+      return res.status(400).json({ error: "sessionId zorunludur" });
+    }
+
+    // What the camera recorded at the shutter moment wins over the app's values:
+    // true position, and the real camera yaw for photos taken mid-turn. It also
+    // lets lat/lon be omitted (recovering old flights from the SD card).
+    const xmp = readDjiXmp(req.file.path);
+    const num = (v) => (v !== undefined && v !== null && v !== "" && Number.isFinite(Number(v)) ? Number(v) : null);
+    const finalLat = xmp?.lat ?? num(lat);
+    const finalLon = xmp?.lon ?? num(lon);
+    if (finalLat === null || finalLon === null) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(400).json({ error: "Konum yok: lat/lon gönderilmedi ve fotoğrafta DJI GPS bilgisi bulunamadı" });
     }
 
     const session = await FlightSessionModel.getById(Number(sessionId));
@@ -105,14 +120,17 @@ router.post("/upload", upload.single("file"), async (req, res) => {
       droneId: resolvedDroneId,
       areaId: areaId ? Number(areaId) : null,
       filePath: req.file.path,
-      lat: Number(lat),
-      lon: Number(lon),
-      altitude: altitude !== undefined ? Number(altitude) : null,
-      heading: heading !== undefined ? Number(heading) : null,
+      lat: finalLat,
+      lon: finalLon,
+      altitude: xmp?.relativeAltitude ?? num(altitude),
+      heading: xmp?.gimbalYaw ?? num(heading),
       capturedAt: capturedAt ? new Date(Number(capturedAt)) : null
     });
 
-    console.log(`📸 Foto yüklendi: session=${sessionId}, drone=${resolvedDroneId ?? "?"}, id=${photo.id}`);
+    console.log(
+      `📸 Foto yüklendi: session=${sessionId}, drone=${resolvedDroneId ?? "?"}, id=${photo.id}` +
+      (xmp ? ` (DJI XMP: yaw ${xmp.gimbalYaw ?? "?"}°, ${xmp.relativeAltitude ?? "?"} m)` : " (XMP yok)")
+    );
     res.status(201).json(photo);
   } catch (err) {
     console.error("❌ Photo upload error:", err.message);
