@@ -6,7 +6,7 @@ const path = require("path");
 const PhotoModel = require("../models/photo.model");
 const FlightSessionModel = require("../models/flightSession.model");
 const LivePhotoModel = require("../models/livePhoto.model");
-const { livePhotoUrl } = require("../services/livePhoto.service");
+const { livePhotoUrl, saveLivePhoto } = require("../services/livePhoto.service");
 const WasteDetectionModel = require("../models/wasteDetection.model");
 const WasteDetectionService = require("../services/wasteDetection.service");
 
@@ -56,6 +56,24 @@ router.get("/live", async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+/**
+ * POST /api/photos/live/import
+ * Body: { photos: [{ imageBase64, lat, lon, altitude?, heading?, timestamp?, droneId?, sessionId? }] }
+ * Recovers previews that only exist in an open dashboard page (sent from the
+ * browser console). Stored like live ones, under today's day folder.
+ */
+router.post("/live/import", express.json({ limit: "50mb" }), async (req, res) => {
+  const photos = Array.isArray(req.body?.photos) ? req.body.photos : [];
+  let saved = 0;
+  for (const p of photos) {
+    if (!p?.imageBase64 || typeof p.lat !== "number" || typeof p.lon !== "number") continue;
+    const row = await saveLivePhoto(p, { droneId: p.droneId || null, sessionId: p.sessionId || null });
+    if (row) saved += 1;
+  }
+  console.log(`🗂️  Önizleme içe aktarma: ${saved}/${photos.length} kaydedildi`);
+  res.json({ received: photos.length, saved });
 });
 
 /** GET /api/photos/live/summary — preview counts per day / drone / session */

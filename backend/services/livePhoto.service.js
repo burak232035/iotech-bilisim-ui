@@ -22,7 +22,7 @@ async function saveLivePhoto(data, { droneId, sessionId }) {
   try {
     const base64 = String(data.imageBase64).replace(/^data:image\/\w+;base64,/, "");
     const buffer = Buffer.from(base64, "base64");
-    if (buffer.length === 0) return;
+    if (buffer.length === 0) return null;
 
     const now = new Date();
     const dayFolder = dayFolderName(now);
@@ -30,11 +30,12 @@ async function saveLivePhoto(data, { droneId, sessionId }) {
     fs.mkdirSync(dir, { recursive: true });
 
     const time = now.toTimeString().slice(0, 8).replace(/:/g, "");
-    const fileName = `${droneId || "drone"}_s${sessionId ?? "x"}_${time}_${now.getTime() % 1000}.jpg`;
+    const unique = `${now.getTime() % 1000}${Math.random().toString(36).slice(2, 6)}`;
+    const fileName = `${droneId || "drone"}_s${sessionId ?? "x"}_${time}_${unique}.jpg`;
     const filePath = path.join(dir, fileName);
     await fs.promises.writeFile(filePath, buffer);
 
-    await LivePhotoModel.create({
+    return await LivePhotoModel.create({
       sessionId,
       droneId,
       dayFolder,
@@ -47,6 +48,7 @@ async function saveLivePhoto(data, { droneId, sessionId }) {
     });
   } catch (err) {
     console.error("❌ Canlı önizleme kaydedilemedi:", err.message);
+    return null;
   }
 }
 
