@@ -155,6 +155,25 @@ Mevcut format korunur; `droneId` ve iki yeni alan eklenir:
   `status: "failed"` ve hata mesajı döner.
 - `mission.finishAction` ve `mission.headingMode` Android'de okunmaz; görev
   sonunda drone her zaman eve döner.
+- `mission.purpose`: `"mapping"` (varsayılan; ortomozaik çekimi) veya
+  `"waste_scan"` (çöp taraması). `mission.livePreview`: `waste_scan`'de `false`.
+
+### 3.5 Çöp taraması (`purpose: "waste_scan"`)
+
+Aynı alanın ortomozaiği çıkarıldıktan sonra o alana gönderilen, yalnızca
+fotoğraf çeken görev:
+
+- **Canlı önizleme yok.** `livePreview: false` gelir; Android bu görevde
+  `drone_photo` göndermeyebilir (bant genişliği tasarrufu). Gönderse bile backend
+  bu görev süresince önizlemeleri dashboard'a iletmez.
+- **İniş sonrası yükleme her zamanki gibi** (`POST /api/photos/upload`, tam çözünürlük).
+- Backend her yüklenen fotoğrafı **hemen çöp tespitinden geçirir**, tespitleri
+  fotoğrafın XMP konumu/irtifası/kamera yönüyle GPS'e çevirir ve dashboard'a
+  `waste_detections` olayıyla gönderir. Noktalar o alanın son ortomozaiği
+  üzerinde gösterilir.
+- Örtüşen fotoğraflarda aynı çöp iki kez görünmesin diye, aynı oturumda aynı
+  türden 2 m içindeki tespitler tek nokta sayılır. Yerde 6 m'den büyük kutular
+  (araç, iskele vb.) elenir.
 - `mission.rthHeight`: Android bunu görev başlamadan önce drone'a yazar.
   **Çoklu drone görevinde `rthHeight` yoksa Android görevi başlatmamalı ve
   hata dönmelidir** (sabit varsayılan değer kullanılmaz; bkz. §6.2).

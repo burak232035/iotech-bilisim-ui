@@ -34,6 +34,13 @@ const SESSION_DISCONNECT_TIMEOUT_MS = 30 * 60 * 1000; // end session after 30 mi
 const LANDED_CONFIRM_MS             = 60 * 1000;      // landed this long after mission_complete
 const LANDED_AGL_THRESHOLD_M        = 1.5;            // v1 fallback when isFlying is absent
 const SWEEP_INTERVAL_MS             = 30 * 1000;
+// An "active" session this old is a leftover (app closed before landing was
+// seen): never resume it or attach a new flight to it — close it instead.
+const STALE_SESSION_MS              = 6 * 60 * 60 * 1000;
+
+function isStale(sessionRow) {
+  return !!sessionRow?.start_time && Date.now() - new Date(sessionRow.start_time).getTime() > STALE_SESSION_MS;
+}
 
 // Last known GPS fix of any drone — kept for callers that don't pass a droneId.
 let lastKnownPosition = null; // { lat, lon, updatedAt, droneId }
@@ -112,6 +119,7 @@ function droneSummary(entry) {
     areaId:      entry.activeAreaId,
     rthHeight:   entry.activeMission ? entry.activeMission.rthHeight : null,
     missionAltitude: entry.activeMission ? entry.activeMission.maxAltitude : null,
+    missionPurpose: entry.activeMission ? entry.activeMission.purpose : null,
     lastPosition: entry.lastPosition,
     connectedAt: entry.connectedAt,
     disconnectedAt: entry.disconnectedAt
@@ -168,7 +176,11 @@ async function ensureSession(entry, lastSessionId, { createIfNone = true } = {})
     try {
       const row = await FlightSessionModel.getById(Number(lastSessionId));
       const ownedByDrone = row && (row.drone_id === entry.droneId || row.drone_id == null);
-      if (row && row.status === "active" && ownedByDrone) {
+      if (row && row.status === "active" && ownedByDrone && isStale(row)) {
+        await FlightSessionModel.endSession(row.id);
+        entry.lastSessionId = row.id;
+        console.log(`🧹 Stale session ${row.id} (${entry.droneId}) closed instead of resumed`);
+      } else if (row && row.status === "active" && ownedByDrone) {
         entry.session = row;
         entry.activeAreaId = row.area_id ?? null;
         console.log(`🔁 Session resumed: ID ${row.id} (${entry.droneId})`);
@@ -330,16 +342,25 @@ async function openNewSession(entry, reason) {
  * Called by the mission route right before waypoint_mission: records the area
  * and mission, then re-sends session_started carrying the areaId.
  */
-async function prepareMissionStart(entry, { areaId, maxAltitude, rthHeight }) {
+async function prepareMissionStart(entry, { areaId, maxAltitude, rthHeight, purpose = "mapping" }) {
+  // A leftover session from an earlier day must not swallow this flight
+  if (entry.session && isStale(entry.session)) await endDroneSession(entry, "stale");
   // Previous session may have closed after landing while the drone stayed connected
   if (!entry.session) await openNewSession(entry, "mission");
 
   entry.activeAreaId      = areaId ?? null;
-  entry.activeMission     = { maxAltitude, rthHeight, startedAt: Date.now() };
+  entry.activeMission     = { maxAltitude, rthHeight, purpose, startedAt: Date.now() };
   entry.missionEndedAt    = null;
   entry.landedSince       = null;
 
   if (!entry.session) return;
+  if (entry.session.purpose !== purpose) {
+    try {
+      entry.session = (await FlightSessionModel.setPurpose(entry.session.id, purpose)) || entry.session;
+    } catch (err) {
+      console.error("❌ Error setting session purpose:", err.message);
+    }
+  }
   if (areaId != null && entry.session.area_id !== areaId) {
     try {
       entry.session = (await FlightSessionModel.setArea(entry.session.id, areaId)) || entry.session;
@@ -385,6 +406,19 @@ function checkLanded(entry, data) {
   }
 }
 
+/** At startup: close "active" sessions left over from earlier runs. */
+async function closeStaleSessions() {
+  try {
+    const rows = await FlightSessionModel.getActiveSessions();
+    for (const row of rows.filter(isStale)) {
+      await FlightSessionModel.endSession(row.id);
+      console.log(`🧹 Stale session ${row.id} (${row.drone_id ?? "?"}) closed at startup`);
+    }
+  } catch (err) {
+    console.error("❌ Stale session cleanup failed:", err.message);
+  }
+}
+
 function startSessionSweeper() {
   setInterval(() => {
     const now = Date.now();
@@ -412,6 +446,7 @@ function initializeSocketIO(httpServer) {
   });
 
   startSessionSweeper();
+  closeStaleSessions();
 
   io.on("connection", (socket) => {
     console.log(`🔌 New connection: ${socket.id}`);
@@ -587,6 +622,8 @@ function initializeSocketIO(httpServer) {
       };
       const entry = drones.get(stamped.droneId);
       if (entry) updatePosition(entry, data.lat, data.lon);
+      // A waste scan is photo-only: no preview on the map (§ waste scan)
+      if (entry?.activeMission?.purpose === "waste_scan") return;
       emitToWeb("drone_photo", stamped);
 
       // Keep the preview (uploads/live/<DD.MM>/ + live_photos) — fire and forget

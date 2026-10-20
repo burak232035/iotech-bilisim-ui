@@ -28,7 +28,8 @@ router.post("/sessions/:id/generate", async (req, res) => {
       });
     }
 
-    const areaId = req.body?.areaId || null;
+    // The flight's own area wins over whatever area is selected on the map
+    const areaId = (await FlightSessionModel.getById(sessionId))?.area_id || req.body?.areaId || null;
     const row = await OrthomosaicModel.create({ sessionId, areaId, photoCount: photos.length });
 
     res.status(201).json({ orthomosaicId: row.id, status: "processing" });

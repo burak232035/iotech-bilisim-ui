@@ -8,6 +8,7 @@ const FlightSessionModel = require("../models/flightSession.model");
 const LivePhotoModel = require("../models/livePhoto.model");
 const { livePhotoUrl, saveLivePhoto } = require("../services/livePhoto.service");
 const { readDjiXmp } = require("../services/djiMetadata.service");
+const { getIO } = require("../socket.io");
 const WasteDetectionModel = require("../models/wasteDetection.model");
 const WasteDetectionService = require("../services/wasteDetection.service");
 
@@ -118,7 +119,7 @@ router.post("/upload", upload.single("file"), async (req, res) => {
     const photo = await PhotoModel.create({
       sessionId: Number(sessionId),
       droneId: resolvedDroneId,
-      areaId: areaId ? Number(areaId) : null,
+      areaId: areaId ? Number(areaId) : (session?.area_id ?? null),
       filePath: req.file.path,
       lat: finalLat,
       lon: finalLon,
@@ -132,6 +133,22 @@ router.post("/upload", upload.single("file"), async (req, res) => {
       (xmp ? ` (DJI XMP: yaw ${xmp.gimbalYaw ?? "?"}°, ${xmp.relativeAltitude ?? "?"} m)` : " (XMP yok)")
     );
     res.status(201).json(photo);
+
+    // Waste scan: detect each photo as it arrives and push the points to the map
+    if (session?.purpose === "waste_scan") {
+      WasteDetectionService.detectAndStore(photo)
+        .then((stored) => {
+          console.log(`♻️  Tarama tespiti: foto ${photo.id} → ${stored.length} yeni nokta`);
+          getIO()?.emit("waste_detections", {
+            sessionId: photo.session_id,
+            areaId: photo.area_id,
+            droneId: photo.drone_id,
+            photoId: photo.id,
+            detections: stored
+          });
+        })
+        .catch((err) => console.error(`❌ Tarama tespiti başarısız (foto ${photo.id}):`, err.message));
+    }
   } catch (err) {
     console.error("❌ Photo upload error:", err.message);
     res.status(500).json({ error: err.message });

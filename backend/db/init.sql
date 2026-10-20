@@ -213,6 +213,9 @@ CREATE TABLE IF NOT EXISTS live_photos (
 CREATE INDEX IF NOT EXISTS idx_live_photos_day ON live_photos(day_folder);
 CREATE INDEX IF NOT EXISTS idx_live_photos_session ON live_photos(session_id);
 
+-- Mission purpose: 'mapping' (orthomosaic photos) or 'waste_scan' (auto waste detection)
+ALTER TABLE flight_sessions ADD COLUMN IF NOT EXISTS purpose VARCHAR(30);
+
 -- ================================================
 -- Success Message
 -- ================================================

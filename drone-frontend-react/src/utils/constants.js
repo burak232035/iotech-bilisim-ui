@@ -17,6 +17,7 @@ export const API_ENDPOINTS = {
   CLASSIFY_STATUS:   (jobId) => `/api/photos/classify/status/${jobId}`,
   SESSION_DETECTIONS: (sessionId) => `/api/photos/sessions/${sessionId}/detections`,
   AREA_DETECTIONS:    (areaId) => `/api/photos/areas/${areaId}/detections`,
+  AREA_ORTHOMOSAICS:  (areaId) => `/api/orthomosaic/areas/${areaId}`,
   LANDCOVER_ANALYZE: (sessionId) => `/api/landcover/sessions/${sessionId}/analyze`,
   LANDCOVER_STATUS:  (jobId) => `/api/landcover/status/${jobId}`,
   LANDCOVER_RESULT:  (sessionId) => `/api/landcover/sessions/${sessionId}`
@@ -89,6 +90,7 @@ export const SOCKET_EVENTS = {
   SESSION_STARTED:  'session_started',
   SESSION_ENDED:    'session_ended',
   DRONES_STATE:     'drones_state',
+  WASTE_DETECTIONS: 'waste_detections',   // live points from a waste-scan mission
   MISSION_PROGRESS: 'mission_progress',
   MISSION_COMPLETE: 'mission_complete',
   MISSION_STOPPED:  'mission_stopped',

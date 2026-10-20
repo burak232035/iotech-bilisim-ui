@@ -36,6 +36,20 @@ class FlightSessionModel {
   }
 
   /**
+   * Set what the session's mission is for ('mapping' | 'waste_scan').
+   * @param {number} sessionId
+   * @param {string} purpose
+   * @returns {Promise<Object|null>}
+   */
+  static async setPurpose(sessionId, purpose) {
+    const result = await pool.query(
+      `UPDATE flight_sessions SET purpose = $1 WHERE id = $2 RETURNING *`,
+      [purpose, sessionId]
+    );
+    return result.rows[0] || null;
+  }
+
+  /**
    * Record the DJI serial once it's known (the app may register before the aircraft connects).
    * @param {number} sessionId
    * @param {string} serial

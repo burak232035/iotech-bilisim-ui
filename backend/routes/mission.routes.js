@@ -185,7 +185,9 @@ router.post("/plan", async (req, res) => {
  * POST /api/mission/start
  * Send drone_command(waypoint_mission) to ONE drone (never broadcast).
  *
- * Body: { waypoints, droneId?, areaId?, areaName?, altitudeM?, speedMs?, savedRouteId? }
+ * Body: { waypoints, droneId?, areaId?, areaName?, altitudeM?, speedMs?, savedRouteId?, purpose? }
+ * purpose: "mapping" (default, orthomosaic photos + live previews) or
+ *          "waste_scan" (photo-only: no live previews, uploads auto-run waste detection)
  * droneId may be omitted only while exactly one drone is connected.
  * rthHeight is computed here (MULTI_DRONE_PROTOCOL.md §6.2) and sent in mission.rthHeight.
  */
@@ -198,11 +200,15 @@ router.post("/start", async (req, res) => {
       areaName,
       altitudeM    = 50,
       speedMs      = 8,
-      savedRouteId = null
+      savedRouteId = null,
+      purpose      = "mapping"
     } = req.body;
 
     if (!Array.isArray(waypoints) || waypoints.length === 0) {
       return res.status(400).json({ error: "waypoints[] zorunludur" });
+    }
+    if (!["mapping", "waste_scan"].includes(purpose)) {
+      return res.status(400).json({ error: `Geçersiz görev tipi: ${purpose}` });
     }
     if (droneId === "all") {
       return res.status(400).json({ error: "Görev tek bir drone'a gönderilmelidir" });
@@ -235,7 +241,7 @@ router.post("/start", async (req, res) => {
     const parsedAreaId = areaId != null && areaId !== "" ? Number(areaId) : null;
 
     // Records area + mission and re-sends session_started (with areaId) first.
-    await prepareMissionStart(entry, { areaId: parsedAreaId, maxAltitude, rthHeight: rth.rthHeight });
+    await prepareMissionStart(entry, { areaId: parsedAreaId, maxAltitude, rthHeight: rth.rthHeight, purpose });
 
     const command = {
       command: "waypoint_mission",
@@ -245,6 +251,8 @@ router.post("/start", async (req, res) => {
         altitude:     Number(altitudeM),
         speed:        Number(speedMs),
         rthHeight:    rth.rthHeight,
+        purpose,
+        livePreview:  purpose !== "waste_scan",   // Android may skip drone_photo when false
         finishAction: "go_home",      // drone returns home after completion
         headingMode:  "auto",         // heading follows flight path
         waypoints:    mappedWaypoints
@@ -256,7 +264,7 @@ router.post("/start", async (req, res) => {
     sendToDrone(entry, "drone_command", command);
 
     console.log(
-      `🚁 Waypoint mission gönderildi: ${entry.droneId}, ${waypoints.length} WP, ` +
+      `🚁 Waypoint mission gönderildi: ${entry.droneId} (${purpose}), ${waypoints.length} WP, ` +
       `RTH ${rth.rthHeight} m` + (warning ? ` — ⚠️ ${warning}` : "")
     );
 

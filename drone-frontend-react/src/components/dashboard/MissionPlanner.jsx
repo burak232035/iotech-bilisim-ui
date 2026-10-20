@@ -209,6 +209,9 @@ export function MissionPlanner() {
   const [overlapPercent, setOverlapPercent] = useState(DEFAULT_OVERLAP);
   const [frontOverlapPercent, setFrontOverlapPercent] = useState(DEFAULT_FRONT_OVERLAP);
   const [speedMs,        setSpeedMs]        = useState(DEFAULT_SPEED);
+  // 'mapping': photos for the orthomosaic (live previews on the map)
+  // 'waste_scan': photo-only scan, uploads are auto-checked for waste and shown as points
+  const [purpose,        setPurpose]        = useState('mapping');
   const [plannedMission, setPlannedMission] = useState(null);
   const [loading,        setLoading]        = useState(false);
   const [status,         setStatus]         = useState(null);
@@ -373,12 +376,16 @@ export function MissionPlanner() {
         areaName:     plannedMission.areaName,
         altitudeM:    selectedAlt,
         speedMs:      Number(speedMs),
-        savedRouteId: plannedMission.savedRouteId
+        savedRouteId: plannedMission.savedRouteId,
+        purpose
       });
       setMissionDroneId(res.droneId ?? selectedDroneId);
       setMissionStatus('running');
       setCurrentWpIdx(0);
-      const rth = res.rthHeight != null ? ` · RTH irtifası ${res.rthHeight} m` : '';
+      const rth = (res.rthHeight != null ? ` · RTH irtifası ${res.rthHeight} m` : '') +
+        (purpose === 'waste_scan'
+          ? ' · Çöp taraması: ekrana fotoğraf basılmaz, iniş sonrası yüklenen fotoğraflardaki çöpler haritada nokta olarak görünür'
+          : '');
       setStatus(res.warning
         ? { type: 'warning', msg: `🚁 ${res.message}${rth}. ⚠️ ${res.warning}` }
         : { type: 'success', msg: `🚁 ${res.message}${rth}` });
@@ -576,6 +583,30 @@ export function MissionPlanner() {
                   <div className="fw-bold text-primary">{stripPrev} m</div>
                 </div>
               </div>
+            </div>
+
+            {/* ── Mission purpose ── */}
+            <div className="d-flex flex-wrap align-items-center gap-3 mb-3">
+              <span className="fw-bold"><i className="fas fa-bullseye me-1"></i>Görev tipi:</span>
+              {[
+                { value: 'mapping',    label: 'Haritalama (ortomozaik)', hint: 'Fotoğraflar ortomozaik için; canlı önizleme haritada görünür' },
+                { value: 'waste_scan', label: 'Çöp taraması',            hint: 'Yalnızca yüksek çözünürlüklü fotoğraf; çöpler iniş sonrası haritada nokta olarak çıkar' }
+              ].map(o => (
+                <label key={o.value} className="d-flex align-items-center gap-1" title={o.hint} style={{ cursor: 'pointer' }}>
+                  <input
+                    type="radio" name="mission-purpose" value={o.value}
+                    checked={purpose === o.value}
+                    onChange={() => setPurpose(o.value)}
+                    disabled={loading}
+                  />
+                  {o.label}
+                </label>
+              ))}
+              {purpose === 'waste_scan' && (
+                <small className="text-muted">
+                  Aynı alanın ortomozaiği varsa noktalar onun üzerinde gösterilir.
+                </small>
+              )}
             </div>
 
             {/* ── Action buttons ── */}
