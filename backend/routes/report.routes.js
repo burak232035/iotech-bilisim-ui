@@ -5,6 +5,27 @@ const generatePDF = require("../services/pdf.service");
 const ReportDataService = require("../services/reportData.service");
 const WasteDetectionModel = require("../models/wasteDetection.model");
 const { getCurrentSession } = require("../socket.io");
+const pool = require("../config/database");
+
+/**
+ * Session to report on for an area: the requested one if it belongs to the
+ * area, otherwise the area's latest flight that has photos (the dashboard
+ * sends the selected drone's last session, which may be another area's).
+ */
+async function sessionForArea(sessionId, areaId) {
+  if (!areaId) return sessionId;
+  const r = await pool.query(
+    `SELECT s.id, s.area_id FROM flight_sessions s WHERE s.id = $1`, [sessionId || 0]
+  );
+  if (r.rows[0] && Number(r.rows[0].area_id) === Number(areaId)) return sessionId;
+  const latest = await pool.query(
+    `SELECT s.id FROM flight_sessions s
+     WHERE s.area_id = $1 AND EXISTS (SELECT 1 FROM photos p WHERE p.session_id = s.id)
+     ORDER BY s.start_time DESC LIMIT 1`,
+    [areaId]
+  );
+  return latest.rows[0]?.id ?? sessionId;
+}
 
 const CATEGORY_DISPLAY_NAMES = {
   "kağıt": "Kağıt",
@@ -25,7 +46,7 @@ router.post("/generate", async (req, res) => {
   const jobId = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
   try {
-    let sessionId = req.body.sessionId;
+    let sessionId = await sessionForArea(req.body.sessionId, req.body.areaId);
 
     if (!sessionId) {
       const currentSession = getCurrentSession();

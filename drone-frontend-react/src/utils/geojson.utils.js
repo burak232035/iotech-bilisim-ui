@@ -61,7 +61,12 @@ export function dbPolygonToGeojsonFeature(areaRow) {
 export function getPointsFromLayer(layer) {
   if (!layer) return null;
 
-  const feature = layer.toGeoJSON?.();
+  // Areas loaded from the DB are L.geoJSON groups → toGeoJSON() gives a
+  // FeatureCollection; drawn shapes give a single Feature. Take the polygon.
+  const json = layer.toGeoJSON?.();
+  const feature = json?.type === 'FeatureCollection'
+    ? json.features?.find(f => f?.geometry?.type === 'Polygon')
+    : json;
   const geom = feature?.geometry;
 
   if (!geom || geom.type !== 'Polygon') return null;

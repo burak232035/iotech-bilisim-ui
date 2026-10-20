@@ -6,8 +6,10 @@
 import { BatteryCard } from './BatteryCard';
 import { ScanProgressCard } from './ScanProgressCard';
 import { ConnectionStatusCard } from './ConnectionStatusCard';
+import { useMap } from '@contexts/MapContext';
 
 export function TelemetryGrid() {
+  const { selectedAreaId, areas } = useMap();
   return (
     <div className="row mt-3">
       <div className="col-md-3 mb-3">
@@ -25,7 +27,11 @@ export function TelemetryGrid() {
           </div>
           <div className="card-body">
             <div>
-              <strong id="selectedAreaName">Seçilmedi</strong>
+              <strong id="selectedAreaName">
+                {selectedAreaId
+                  ? `${areas.get(selectedAreaId)?.name || areas.get(String(selectedAreaId))?.name || 'Alan'} (ID ${selectedAreaId})`
+                  : 'Seçilmedi'}
+              </strong>
             </div>
             <small className="text-muted">
               Lejanttan veya haritadaki polygona tıklayarak seç.

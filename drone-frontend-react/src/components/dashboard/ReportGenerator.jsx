@@ -10,9 +10,19 @@ import { useMap } from '@contexts/MapContext';
 import { useSocket } from '@contexts/SocketContext';
 import { ReportService } from '@services/report.service';
 import { getPointsFromLayer } from '@utils/geojson.utils';
+import { WASTE_CATEGORY_COLORS } from '@utils/constants';
+
+/** Most recent detection on the map (by creation time), or null. */
+function latestDetection(detections) {
+  if (!detections || detections.length === 0) return null;
+  return detections.reduce((a, b) =>
+    new Date(b.created_at || 0) > new Date(a.created_at || 0) ? b : a
+  );
+}
 
 export function ReportGenerator() {
-  const { selectedAreaId, areas } = useMap();
+  const { selectedAreaId, areas, wasteDetections } = useMap();
+  const latest = latestDetection(wasteDetections);
   const { currentSessionId } = useSocket();
   const [isGenerating, setIsGenerating] = useState(false);
   const [status, setStatus] = useState({ message: '', type: '' });
@@ -64,7 +74,7 @@ export function ReportGenerator() {
     } catch (error) {
       console.error('Report generation error:', error);
       setStatus({
-        message: 'PDF oluşturulamadı. Backend çalışıyor mu? (localhost:3001)',
+        message: `PDF oluşturulamadı: ${error.message || 'backend çalışıyor mu?'}`,
         type: 'danger'
       });
     } finally {
@@ -76,17 +86,40 @@ export function ReportGenerator() {
     <div className="row mt-2">
       <div className="col-md-6">
         <Card title="Yeni Atık" icon="fas fa-trash" variant="warning">
-          <ul className="mb-0">
-            <li>
-              Kategori: <span>Plastik</span>
-            </li>
-            <li>
-              Koordinat: <span>--</span>
-            </li>
-            <li>
-              Zaman: <span>{new Date().toLocaleString('tr-TR')}</span>
-            </li>
-          </ul>
+          {latest ? (
+            <ul className="mb-0">
+              <li>
+                Kategori:{' '}
+                <span className="fw-bold text-capitalize" style={{ color: WASTE_CATEGORY_COLORS[latest.category] }}>
+                  {latest.category}
+                </span>
+                {latest.confidence != null && (
+                  <small className="text-muted"> (%{Math.round(Number(latest.confidence) * 100)} güven)</small>
+                )}
+              </li>
+              <li>
+                Koordinat:{' '}
+                <span>{Number(latest.lat).toFixed(6)}, {Number(latest.lon).toFixed(6)}</span>{' '}
+                <a
+                  href={`https://www.google.com/maps?q=${Number(latest.lat)},${Number(latest.lon)}`}
+                  target="_blank" rel="noopener noreferrer"
+                >
+                  haritada aç
+                </a>
+              </li>
+              <li>
+                Zaman: <span>{latest.created_at ? new Date(latest.created_at).toLocaleString('tr-TR') : '--'}</span>
+              </li>
+              <li>
+                <small className="text-muted">Haritada toplam {wasteDetections.length} tespit</small>
+              </li>
+            </ul>
+          ) : (
+            <small className="text-muted">
+              Henüz tespit yok — "Fotoğrafları Analiz Et", "Alanın Çöp Haritasını Göster"
+              ya da bir çöp taraması sonrası en son bulunan atık burada görünür.
+            </small>
+          )}
         </Card>
       </div>
 

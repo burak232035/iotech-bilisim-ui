@@ -164,7 +164,9 @@ class ApiServiceClass {
    * @returns {Promise<Blob>}
    */
   async generateReport(sessionId, areaId, points, options = {}) {
-    const response = await this.request(API_ENDPOINTS.REPORTS, {
+    // The backend builds the PDF in the background: POST returns { jobId },
+    // then wait-and-download holds the request until the file is ready.
+    const { jobId } = await this.request(API_ENDPOINTS.REPORTS, {
       method: 'POST',
       body: JSON.stringify({
         sessionId,
@@ -173,8 +175,15 @@ class ApiServiceClass {
         options
       })
     });
+    if (!jobId) throw new Error('Rapor işi başlatılamadı');
 
-    return await response.blob();
+    const res = await fetch(`${API_BASE_URL}/api/reports/wait-and-download/${jobId}`);
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try { msg = (await res.json()).error || msg; } catch { /* not JSON */ }
+      throw new Error(msg);
+    }
+    return await res.blob();
   }
 }
 
