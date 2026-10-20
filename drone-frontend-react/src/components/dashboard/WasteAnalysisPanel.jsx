@@ -19,15 +19,12 @@ function countByCategory(detections) {
   return counts;
 }
 
-/** Latest finished orthomosaic of an area as an overlay spec, or null. */
-async function loadAreaOrthomosaic(areaId) {
+/** Id of the latest finished orthomosaic of an area, or null. */
+async function latestAreaOrthomosaicId(areaId) {
   const res = await fetch(`${API_BASE_URL}${API_ENDPOINTS.AREA_ORTHOMOSAICS(areaId)}`);
   if (!res.ok) return null;
   const rows = await res.json();
-  const latest = rows.find(r => r.file_path && r.bounds);
-  if (!latest) return null;
-  const fileName = latest.file_path.split(/[\\/]/).pop();
-  return { url: `${API_BASE_URL}/uploads/orthomosaics/${fileName}?t=${latest.id}`, bounds: latest.bounds };
+  return rows.find(r => r.file_path && r.bounds)?.id ?? null;
 }
 
 const STATUS_LABELS = {
@@ -37,13 +34,24 @@ const STATUS_LABELS = {
 };
 
 export function WasteAnalysisPanel() {
-  const { setWasteDetections, setOrthomosaicLayer, orthomosaicLayer, selectedAreaId } = useMap();
+  const { setWasteDetections, setOrthomosaicOnMap, orthomosaics, selectedAreaId } = useMap();
   const { currentSessionId, socket } = useSocket();
   const [scanInfo, setScanInfo] = useState(null); // { areaId, points, photos } during a live waste scan
   const [areaLoading, setAreaLoading] = useState(false);
   const shownAreaRef = useRef(null);                // area whose orthomosaic is under the points
-  const orthoShownRef = useRef(false);
-  useEffect(() => { orthoShownRef.current = !!orthomosaicLayer; }, [orthomosaicLayer]);
+  const pinnedAreasRef = useRef(new Set());          // areas that already have a pinned orthomosaic
+  useEffect(() => {
+    pinnedAreasRef.current = new Set(orthomosaics.map(o => o.area_id).filter(a => a != null));
+  }, [orthomosaics]);
+
+  /** Make sure the area's latest orthomosaic is on the map; returns false if it has none. */
+  const pinAreaOrthomosaic = async (areaId) => {
+    if (pinnedAreasRef.current.has(Number(areaId))) return true;
+    const id = await latestAreaOrthomosaicId(areaId);
+    if (id == null) return false;
+    await setOrthomosaicOnMap(id, true);
+    return true;
+  };
 
   // Live waste-scan results: each uploaded scan photo is detected on the server
   // and its new points arrive here; show them over the area's orthomosaic.
@@ -59,15 +67,13 @@ export function WasteAnalysisPanel() {
       }));
       if (data?.areaId && shownAreaRef.current !== data.areaId) {
         shownAreaRef.current = data.areaId;
-        if (!orthoShownRef.current) {
-          const layer = await loadAreaOrthomosaic(data.areaId).catch(() => null);
-          if (layer) setOrthomosaicLayer(layer);
-        }
+        await pinAreaOrthomosaic(data.areaId).catch(() => false);
       }
     };
     socket.on(SOCKET_EVENTS.WASTE_DETECTIONS, onDetections);
     return () => socket.off(SOCKET_EVENTS.WASTE_DETECTIONS, onDetections);
-  }, [socket, setWasteDetections, setOrthomosaicLayer]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socket, setWasteDetections]);
 
   // Area waste map: latest orthomosaic + every detection in the area (all flights)
   const handleShowAreaMap = async () => {
@@ -75,16 +81,15 @@ export function WasteAnalysisPanel() {
     setAreaLoading(true);
     setError('');
     try {
-      const [layer, detections] = await Promise.all([
-        loadAreaOrthomosaic(selectedAreaId),
+      const [hasOrtho, detections] = await Promise.all([
+        pinAreaOrthomosaic(selectedAreaId),
         WasteService.getAreaDetections(selectedAreaId)
       ]);
-      if (layer) setOrthomosaicLayer(layer);
       shownAreaRef.current = Number(selectedAreaId);
       setWasteDetections(detections);
       setCategoryCounts(countByCategory(detections));
       setSummary(null);
-      if (!layer) setError('Bu alan için hazır ortomozaik yok — noktalar normal harita üzerinde gösteriliyor.');
+      if (!hasOrtho) setError('Bu alan için hazır ortomozaik yok — noktalar normal harita üzerinde gösteriliyor.');
     } catch (err) {
       setError(err.message || 'Alan haritası yüklenemedi.');
     } finally {

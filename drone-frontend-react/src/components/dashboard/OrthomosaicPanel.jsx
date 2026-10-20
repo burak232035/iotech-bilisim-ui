@@ -1,7 +1,7 @@
 /**
  * OrthomosaicPanel
  * Uçuş sonrası yüklenmiş tam-çözünürlük fotoğrafları tek bir hava
- * görüntüsünde birleştirir ve haritaya (orthomosaicLayer) basar.
+ * görüntüsünde birleştirir ve haritaya sabitler (kaldırılana kadar kalır).
  *
  * Varsayılan motor Docker'sız orthomosaic-service (OpenCV): her foto önce
  * GPS+pusula ile yerleştirilir, sonra komşularıyla görsel özellik
@@ -22,7 +22,7 @@ const STATUS_LABELS = {
 };
 
 export function OrthomosaicPanel() {
-  const { setOrthomosaicLayer, selectedAreaId } = useMap();
+  const { refreshOrthomosaics, setOrthomosaicOnMap, orthomosaics, selectedAreaId } = useMap();
   const { currentSessionId } = useSocket();
 
   const [isRunning, setIsRunning] = useState(false);
@@ -42,12 +42,13 @@ export function OrthomosaicPanel() {
     setProgressLabel(STATUS_LABELS.processing);
 
     try {
-      const { url, bounds } = await OrthomosaicService.generateAndWait(
+      await OrthomosaicService.generateAndWait(
         currentSessionId,
         selectedAreaId,
         (status) => setProgressLabel(STATUS_LABELS[status] || status)
       );
-      setOrthomosaicLayer({ url: `${url}?t=${Date.now()}`, bounds });
+      // The backend pins a finished result to the map — just reload the list
+      await refreshOrthomosaics();
       setDone(true);
     } catch (err) {
       console.error('Orthomosaic generation error:', err);
@@ -89,6 +90,30 @@ export function OrthomosaicPanel() {
 
           {error && (
             <small className="d-block mt-2 text-danger">{error}</small>
+          )}
+
+          {orthomosaics.length > 0 && (
+            <div className="mt-3">
+              <div className="fw-bold mb-1" style={{ fontSize: '0.85rem' }}>
+                <i className="fas fa-map me-1"></i>Haritadaki ortomozaikler
+                <small className="text-muted fw-normal"> — kaldırılana kadar sayfa yenilense de kalır</small>
+              </div>
+              {orthomosaics.map(o => (
+                <div key={o.id} className="d-flex align-items-center justify-content-between border rounded px-2 py-1 mb-1"
+                     style={{ fontSize: '0.82rem' }}>
+                  <span>
+                    {o.area_name ? `${o.area_name} (alan ${o.area_id})` : (o.area_id ? `Alan ${o.area_id}` : 'Alan yok')}
+                    {o.drone_id && ` · ${o.drone_id}`}
+                    {` · oturum ${o.session_id} · ${o.photo_count} foto · `}
+                    {new Date(o.created_at).toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                  <button type="button" className="btn btn-sm btn-outline-danger py-0"
+                          onClick={() => setOrthomosaicOnMap(o.id, false)}>
+                    Kaldır
+                  </button>
+                </div>
+              ))}
+            </div>
           )}
 
           {done && (

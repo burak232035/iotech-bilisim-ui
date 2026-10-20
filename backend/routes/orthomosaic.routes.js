@@ -66,6 +66,26 @@ router.get("/sessions/:id", async (req, res) => {
   }
 });
 
+// GET /api/orthomosaic/on-map — orthomosaics pinned to the dashboard map
+router.get("/on-map", async (req, res) => {
+  try {
+    res.json(await OrthomosaicModel.getOnMap());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/orthomosaic/:id/on-map  { visible: true|false } — pin to / remove from the map
+router.post("/:id/on-map", async (req, res) => {
+  try {
+    const row = await OrthomosaicModel.setOnMap(Number(req.params.id), req.body?.visible !== false);
+    if (!row) return res.status(404).json({ error: "Ortomozaik bulunamadı" });
+    res.json(row);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/orthomosaic/areas/:id — all completed orthomosaics for an area
 router.get("/areas/:id", async (req, res) => {
   try {

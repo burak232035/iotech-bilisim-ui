@@ -4,9 +4,10 @@
  * Adapted from harita.js lines 372-945
  */
 
-import { createContext, useContext, useState, useCallback, useMemo } from 'react';
+import { createContext, useContext, useState, useCallback, useMemo, useEffect } from 'react';
 import { ApiService } from '@services/api.service';
 import { MissionService } from '@services/mission.service';
+import { API_BASE_URL, API_ENDPOINTS } from '@utils/constants';
 
 const MapContext = createContext(null);
 
@@ -29,9 +30,36 @@ export function MapProvider({ children }) {
   // colored markers on the map. Array<{id, category, confidence, lat, lon}> | null
   const [wasteDetections, setWasteDetections] = useState(null);
 
-  // Stitched ODM orthomosaic for the currently analyzed session — a single
-  // north-aligned image overlay. {url, bounds:{swLat,swLon,neLat,neLon}} | null
-  const [orthomosaicLayer, setOrthomosaicLayer] = useState(null);
+  // Orthomosaics pinned to the map (stored server-side, so they survive page
+  // reloads until the user removes them). Rows of /api/orthomosaic/on-map
+  // plus a ready-to-use `url`.
+  const [orthomosaics, setOrthomosaics] = useState([]);
+
+  const refreshOrthomosaics = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}${API_ENDPOINTS.ORTHOMOSAICS_ON_MAP}`);
+      if (!res.ok) return;
+      const rows = await res.json();
+      setOrthomosaics(rows.map((r) => ({
+        ...r,
+        url: `${API_BASE_URL}/uploads/orthomosaics/${String(r.file_path).split(/[\\/]/).pop()}?t=${r.id}`
+      })));
+    } catch (err) {
+      console.warn('Ortomozaik listesi alınamadı:', err.message);
+    }
+  }, []);
+
+  /** Pin (visible=true) or remove (false) an orthomosaic on the map. */
+  const setOrthomosaicOnMap = useCallback(async (id, visible) => {
+    await fetch(`${API_BASE_URL}${API_ENDPOINTS.ORTHOMOSAIC_ON_MAP(id)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ visible })
+    });
+    await refreshOrthomosaics();
+  }, [refreshOrthomosaics]);
+
+  useEffect(() => { refreshOrthomosaics(); }, [refreshOrthomosaics]);
 
   /**
    * Load areas from database
@@ -187,8 +215,9 @@ export function MapProvider({ children }) {
       clearPhotosFlag,
       wasteDetections,
       setWasteDetections,
-      orthomosaicLayer,
-      setOrthomosaicLayer
+      orthomosaics,
+      refreshOrthomosaics,
+      setOrthomosaicOnMap
     }),
     [
       map,
@@ -209,7 +238,9 @@ export function MapProvider({ children }) {
       clearPhotoOverlays,
       clearPhotosFlag,
       wasteDetections,
-      orthomosaicLayer
+      orthomosaics,
+      refreshOrthomosaics,
+      setOrthomosaicOnMap
     ]
   );
 

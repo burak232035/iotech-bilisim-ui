@@ -216,6 +216,9 @@ CREATE INDEX IF NOT EXISTS idx_live_photos_session ON live_photos(session_id);
 -- Mission purpose: 'mapping' (orthomosaic photos) or 'waste_scan' (auto waste detection)
 ALTER TABLE flight_sessions ADD COLUMN IF NOT EXISTS purpose VARCHAR(30);
 
+-- Orthomosaics pinned to the dashboard map until the user removes them
+ALTER TABLE orthomosaics ADD COLUMN IF NOT EXISTS on_map BOOLEAN DEFAULT FALSE;
+
 -- ================================================
 -- Success Message
 -- ================================================

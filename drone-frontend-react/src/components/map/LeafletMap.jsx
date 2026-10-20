@@ -129,7 +129,7 @@ export function LeafletMap() {
   const drawnItemsRef  = useRef(null);
   const scanLayerRef   = useRef(null);
   const wasteLayerRef  = useRef(null);
-  const orthomosaicLayerRef = useRef(null);
+  const orthomosaicLayersRef = useRef(new Map()); // orthomosaic id -> L.imageOverlay
   const photoLayersRef = useRef([]);   // array of L.imageOverlay instances
   const droneMarkersRef = useRef(new Map()); // droneId -> { marker, heading }
   const homeMarkersRef  = useRef(new Map()); // droneId -> home ("H") marker
@@ -146,7 +146,8 @@ export function LeafletMap() {
     incrementPhotoCount,
     clearPhotosFlag,
     wasteDetections,
-    orthomosaicLayer
+    orthomosaics,
+    map
   } = useMap();
 
   const { socket, selectedDroneId } = useSocket();
@@ -351,29 +352,45 @@ export function LeafletMap() {
     wasteLayerRef.current = group;
   }, [wasteDetections]);
 
-  // ── Orthomosaic overlay (ODM-stitched composite) ─────────────────────────────
-  // Already ortho-rectified/north-aligned by ODM — plain (non-rotated) overlay.
+  // ── Orthomosaic overlays (pinned until the user removes them) ────────────────
+  // North-up composites → plain overlays, in their own pane below the vector
+  // layers so waste markers and areas always stay on top.
   useEffect(() => {
     const mapInst = mapInstanceRef.current;
     if (!mapInst) return;
-
-    if (orthomosaicLayerRef.current) {
-      mapInst.removeLayer(orthomosaicLayerRef.current);
-      orthomosaicLayerRef.current = null;
+    if (!mapInst.getPane('orthomosaicPane')) {
+      mapInst.createPane('orthomosaicPane');
+      mapInst.getPane('orthomosaicPane').style.zIndex = 350;
     }
 
-    if (!orthomosaicLayer?.url || !orthomosaicLayer?.bounds) return;
+    const layers = orthomosaicLayersRef.current;
+    const wanted = new Map((orthomosaics || []).filter(o => o.bounds).map(o => [o.id, o]));
 
-    const { swLat, swLon, neLat, neLon } = orthomosaicLayer.bounds;
-    const overlay = L.imageOverlay(
-      orthomosaicLayer.url,
-      [[swLat, swLon], [neLat, neLon]],
-      { opacity: 0.95, interactive: false }
-    ).addTo(mapInst);
-
-    orthomosaicLayerRef.current = overlay;
-    mapInst.fitBounds(overlay.getBounds(), { padding: [30, 30] });
-  }, [orthomosaicLayer]);
+    // A layer counts as present only if it sits on *this* map instance (the
+    // map can be re-created, e.g. React StrictMode mounts effects twice)
+    for (const [id, layer] of layers) {
+      if (!wanted.has(id) || layer._map !== mapInst) {
+        if (layer._map) layer._map.removeLayer(layer);
+        layers.delete(id);
+      }
+    }
+    const added = [];
+    for (const [id, o] of wanted) {
+      if (layers.has(id)) continue;
+      const { swLat, swLon, neLat, neLon } = o.bounds;
+      const overlay = L.imageOverlay(o.url, [[swLat, swLon], [neLat, neLon]], {
+        opacity: 0.95, interactive: false, pane: 'orthomosaicPane'
+      }).addTo(mapInst);
+      layers.set(id, overlay);
+      added.push(overlay);
+    }
+    // Zoom to newly added ones (a fresh result, or the pinned set after a reload)
+    if (added.length) {
+      const bounds = added.reduce((b, l) => b.extend(l.getBounds()), L.latLngBounds(added[0].getBounds()));
+      mapInst.fitBounds(bounds, { padding: [30, 30] });
+    }
+  // `map` re-runs this once the Leaflet map exists (the pinned list can load first)
+  }, [orthomosaics, map]);
 
   // ── Drone photo overlay (Socket.IO) ─────────────────────────────────────────
   useEffect(() => {

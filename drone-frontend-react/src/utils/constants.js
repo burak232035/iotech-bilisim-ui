@@ -18,6 +18,8 @@ export const API_ENDPOINTS = {
   SESSION_DETECTIONS: (sessionId) => `/api/photos/sessions/${sessionId}/detections`,
   AREA_DETECTIONS:    (areaId) => `/api/photos/areas/${areaId}/detections`,
   AREA_ORTHOMOSAICS:  (areaId) => `/api/orthomosaic/areas/${areaId}`,
+  ORTHOMOSAICS_ON_MAP: '/api/orthomosaic/on-map',
+  ORTHOMOSAIC_ON_MAP:  (id) => `/api/orthomosaic/${id}/on-map`,
   LANDCOVER_ANALYZE: (sessionId) => `/api/landcover/sessions/${sessionId}/analyze`,
   LANDCOVER_STATUS:  (jobId) => `/api/landcover/status/${jobId}`,
   LANDCOVER_RESULT:  (sessionId) => `/api/landcover/sessions/${sessionId}`

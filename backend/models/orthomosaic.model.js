@@ -28,7 +28,48 @@ class OrthomosaicModel {
       `UPDATE orthomosaics SET status = 'done', file_path = $1, bounds = $2, error = NULL WHERE id = $3 RETURNING *`,
       [filePath, JSON.stringify(bounds), id]
     );
-    return result.rows[0] || null;
+    const row = result.rows[0] || null;
+    // A new result goes on the map and replaces the area's previous one
+    if (row) await this.setOnMap(id, true);
+    return row;
+  }
+
+  /**
+   * Pin/unpin an orthomosaic on the dashboard map. Pinning hides other
+   * orthomosaics of the same area so only the newest pinned one shows.
+   * @param {number} id
+   * @param {boolean} visible
+   * @returns {Promise<Object|null>}
+   */
+  static async setOnMap(id, visible) {
+    const result = await pool.query(
+      `UPDATE orthomosaics SET on_map = $1 WHERE id = $2 RETURNING *`,
+      [!!visible, id]
+    );
+    const row = result.rows[0] || null;
+    if (row && visible && row.area_id != null) {
+      await pool.query(
+        `UPDATE orthomosaics SET on_map = FALSE WHERE area_id = $1 AND id <> $2`,
+        [row.area_id, id]
+      );
+    }
+    return row;
+  }
+
+  /**
+   * Finished orthomosaics pinned to the map, with drone/area labels.
+   * @returns {Promise<Array>}
+   */
+  static async getOnMap() {
+    const result = await pool.query(
+      `SELECT o.*, s.drone_id, a.name AS area_name
+       FROM orthomosaics o
+       LEFT JOIN flight_sessions s ON s.id = o.session_id
+       LEFT JOIN areas a ON a.id = o.area_id
+       WHERE o.on_map = TRUE AND o.status = 'done' AND o.file_path IS NOT NULL
+       ORDER BY o.created_at ASC`
+    );
+    return result.rows;
   }
 
   /**
