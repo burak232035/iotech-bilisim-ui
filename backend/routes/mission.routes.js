@@ -241,7 +241,9 @@ router.post("/start", async (req, res) => {
     const parsedAreaId = areaId != null && areaId !== "" ? Number(areaId) : null;
 
     // Records area + mission and re-sends session_started (with areaId) first.
-    await prepareMissionStart(entry, { areaId: parsedAreaId, maxAltitude, rthHeight: rth.rthHeight, purpose });
+    await prepareMissionStart(entry, {
+      areaId: parsedAreaId, maxAltitude, rthHeight: rth.rthHeight, purpose, waypointCount: mappedWaypoints.length
+    });
 
     const command = {
       command: "waypoint_mission",

@@ -107,6 +107,21 @@ function emitToWeb(event, payload) {
   webClients.forEach((clientId) => io.to(clientId).emit(event, payload));
 }
 
+/** Waypoint progress of the running mission, or of the last one (kept after it ends). */
+function missionProgress(entry) {
+  const m = entry.activeMission || entry.lastMission;
+  if (!m || !m.waypointCount) return null;
+  const reached = Math.max(0, Math.min(m.waypointCount, (m.progressIndex ?? -1) + 1));
+  return {
+    state: m.state || "running",           // running | completed | stopped
+    purpose: m.purpose || "mapping",
+    areaId: entry.activeAreaId ?? m.areaId ?? null,
+    total: m.waypointCount,
+    reached,
+    percent: Math.round((reached / m.waypointCount) * 100)
+  };
+}
+
 function droneSummary(entry) {
   return {
     droneId:     entry.droneId,
@@ -120,6 +135,7 @@ function droneSummary(entry) {
     rthHeight:   entry.activeMission ? entry.activeMission.rthHeight : null,
     missionAltitude: entry.activeMission ? entry.activeMission.maxAltitude : null,
     missionPurpose: entry.activeMission ? entry.activeMission.purpose : null,
+    missionProgress: missionProgress(entry),
     lastPosition: entry.lastPosition,
     connectedAt: entry.connectedAt,
     disconnectedAt: entry.disconnectedAt
@@ -152,6 +168,7 @@ async function endDroneSession(entry, reason) {
   entry.lastSessionId = sessionId;
   entry.session = null;
   entry.activeAreaId = null;
+  if (entry.activeMission) entry.lastMission = { ...entry.activeMission };
   entry.activeMission = null;
   entry.missionEndedAt = null;
   entry.landedSince = null;
@@ -342,14 +359,18 @@ async function openNewSession(entry, reason) {
  * Called by the mission route right before waypoint_mission: records the area
  * and mission, then re-sends session_started carrying the areaId.
  */
-async function prepareMissionStart(entry, { areaId, maxAltitude, rthHeight, purpose = "mapping" }) {
+async function prepareMissionStart(entry, { areaId, maxAltitude, rthHeight, purpose = "mapping", waypointCount = 0 }) {
   // A leftover session from an earlier day must not swallow this flight
   if (entry.session && isStale(entry.session)) await endDroneSession(entry, "stale");
   // Previous session may have closed after landing while the drone stayed connected
   if (!entry.session) await openNewSession(entry, "mission");
 
   entry.activeAreaId      = areaId ?? null;
-  entry.activeMission     = { maxAltitude, rthHeight, purpose, startedAt: Date.now() };
+  entry.activeMission     = {
+    maxAltitude, rthHeight, purpose, startedAt: Date.now(),
+    areaId: areaId ?? null, waypointCount, progressIndex: -1, state: "running"
+  };
+  entry.lastMission       = null;
   entry.missionEndedAt    = null;
   entry.landedSince       = null;
 
@@ -559,7 +580,14 @@ function initializeSocketIO(httpServer) {
 
     // Drone → Web: Waypoint mission progress updates
     socket.on("mission_progress", (data) => {
-      emitToWeb("mission_progress", stampDroneId(socket, data, "mission_progress"));
+      const stamped = stampDroneId(socket, data, "mission_progress");
+      const entry = drones.get(stamped.droneId);
+      const idx = Number(data?.currentWaypointIndex);
+      if (entry?.activeMission && Number.isFinite(idx)) {
+        entry.activeMission.progressIndex = Math.max(entry.activeMission.progressIndex ?? -1, idx);
+        broadcastDronesState();
+      }
+      emitToWeb("mission_progress", stamped);
     });
 
     // Drone → Web: Waypoint mission completed
@@ -570,8 +598,13 @@ function initializeSocketIO(httpServer) {
       if (entry) {
         entry.missionEndedAt = Date.now();
         entry.landedSince = null;
+        if (entry.activeMission) {
+          entry.activeMission.state = "completed";
+          entry.activeMission.progressIndex = (entry.activeMission.waypointCount || 0) - 1;
+        }
       }
       emitToWeb("mission_complete", stamped);
+      broadcastDronesState();
     });
 
     // Drone → Web: Mission stopped/aborted
@@ -581,6 +614,7 @@ function initializeSocketIO(httpServer) {
       const entry = drones.get(stamped.droneId);
       if (entry) {
         // A stopped mission ends the flight too: close the session once landed
+        if (entry.activeMission) entry.lastMission = { ...entry.activeMission, state: "stopped" };
         entry.activeMission = null;
         entry.missionEndedAt = Date.now();
         entry.landedSince = null;
