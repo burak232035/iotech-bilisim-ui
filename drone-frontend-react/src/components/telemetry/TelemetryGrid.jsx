@@ -11,7 +11,7 @@ import { useMap } from '@contexts/MapContext';
 export function TelemetryGrid() {
   const { selectedAreaId, areas } = useMap();
   return (
-    <div className="row mt-3">
+    <div className="row mt-3 cards-equal">
       <div className="col-md-3 mb-3">
         <BatteryCard />
       </div>

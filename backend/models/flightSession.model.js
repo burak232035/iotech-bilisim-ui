@@ -64,6 +64,34 @@ class FlightSessionModel {
   }
 
   /**
+   * First GPS fix of the flight (written once, when the first position arrives).
+   */
+  static async setStartCoordinates(sessionId, lat, lon) {
+    const result = await pool.query(
+      `UPDATE flight_sessions SET start_coordinates = $1 WHERE id = $2 RETURNING *`,
+      [JSON.stringify({ lat, lon }), sessionId]
+    );
+    return result.rows[0] || null;
+  }
+
+  /**
+   * Last GPS fix + total distance flown, written when the session closes.
+   * @param {number} sessionId
+   * @param {{lat:number, lon:number}|null} end
+   * @param {number|null} distanceM
+   */
+  static async setTrackSummary(sessionId, end, distanceM) {
+    const result = await pool.query(
+      `UPDATE flight_sessions
+       SET end_coordinates = COALESCE($1, end_coordinates),
+           total_distance_meters = COALESCE($2, total_distance_meters)
+       WHERE id = $3 RETURNING *`,
+      [end ? JSON.stringify(end) : null, distanceM != null ? Math.round(distanceM * 100) / 100 : null, sessionId]
+    );
+    return result.rows[0] || null;
+  }
+
+  /**
    * End flight session and update statistics
    * @param {number} sessionId
    * @returns {Promise<Object>}

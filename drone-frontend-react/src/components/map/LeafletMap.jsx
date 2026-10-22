@@ -144,6 +144,7 @@ export function LeafletMap() {
     addArea,
     scanRoute,
     incrementPhotoCount,
+    decrementPhotoCount,
     clearPhotosFlag,
     wasteDetections,
     orthomosaics,
@@ -386,11 +387,24 @@ export function LeafletMap() {
     }
     // Zoom to newly added ones (a fresh result, or the pinned set after a reload)
     if (added.length) {
+      // Live previews sit in the overlay pane (above orthomosaicPane), so once a
+      // finished orthomosaic arrives they would cover it until a page reload.
+      // Drop the previews whose centre falls inside a new orthomosaic; previews
+      // elsewhere (e.g. another drone still flying) stay.
+      const covered = photoLayersRef.current.filter(p =>
+        added.some(o => o.getBounds().contains(p.getBounds().getCenter()))
+      );
+      if (covered.length) {
+        covered.forEach(p => p._map && p._map.removeLayer(p));
+        photoLayersRef.current = photoLayersRef.current.filter(p => !covered.includes(p));
+        decrementPhotoCount(covered.length);
+      }
+
       const bounds = added.reduce((b, l) => b.extend(l.getBounds()), L.latLngBounds(added[0].getBounds()));
       mapInst.fitBounds(bounds, { padding: [30, 30] });
     }
   // `map` re-runs this once the Leaflet map exists (the pinned list can load first)
-  }, [orthomosaics, map]);
+  }, [orthomosaics, map, decrementPhotoCount]);
 
   // ── Drone photo overlay (Socket.IO) ─────────────────────────────────────────
   useEffect(() => {

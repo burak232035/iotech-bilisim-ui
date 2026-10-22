@@ -17,6 +17,13 @@ import { MissionService } from '@services/mission.service';
 import { SOCKET_EVENTS, droneIndex, droneLabel, droneColor } from '@utils/constants';
 
 const DEFAULT_ALTITUDE  = 30;
+/** Flight-time estimate as "m:ss" (a short route must not round down to "0 dk"). */
+function formatEta(distanceM, speedMs) {
+  const sec = Number(distanceM) / Math.max(Number(speedMs) || 1, 0.1);
+  if (!Number.isFinite(sec)) return '—';
+  const m = Math.floor(sec / 60), s = Math.round(sec % 60);
+  return `${m}:${String(s).padStart(2, '0')} dk`;
+}
 // drone-2 flies 10 m above drone-1 by default (MULTI_DRONE_PROTOCOL.md §6.1)
 const DRONE_ALTITUDE_STEP = 10;
 const MIN_ALTITUDE_SEPARATION = 10;
@@ -63,7 +70,7 @@ function AltitudeModal({ mission, speedMs, droneId, otherMissions, onConfirm, on
   const tooClose = otherMissions.filter(o => Math.abs(o.altitude - alt) < MIN_ALTITUDE_SEPARATION);
 
   const distKm     = mission ? (mission.totalDistanceM / 1000).toFixed(2) : '—';
-  const etaMin     = mission ? Math.round(mission.totalDistanceM / Number(speedMs) / 60) : '—';
+  const etaMin     = mission ? formatEta(mission.totalDistanceM, speedMs) : '—';
   const footprintW = Math.round(2 * alt * Math.tan(82.1 / 2 * Math.PI / 180));
 
   return (
@@ -85,7 +92,7 @@ function AltitudeModal({ mission, speedMs, droneId, otherMissions, onConfirm, on
               ADIM 4 — İRTİFA SEÇ & GÖREVI GÖNDER
             </div>
             <div style={{ fontSize: '0.78rem', color: '#64748b' }}>
-              <strong style={{ color: droneColor(droneId) }}>{droneLabel(droneId)}</strong> · {mission?.areaName ?? '—'} · {mission?.waypointCount} waypoint · {distKm} km · ~{etaMin} dk
+              <strong style={{ color: droneColor(droneId) }}>{droneLabel(droneId)}</strong> · {mission?.areaName ?? '—'} · {mission?.waypointCount} waypoint · {distKm} km · ~{etaMin}
             </div>
           </div>
         </div>
@@ -153,7 +160,7 @@ function AltitudeModal({ mission, speedMs, droneId, otherMissions, onConfirm, on
             { lbl: 'İrtifa', val: `${alt} m`, color: '#60a5fa' },
             { lbl: 'Waypoint', val: mission?.waypointCount, color: '#a78bfa' },
             { lbl: 'Mesafe', val: `${distKm} km`, color: '#34d399' },
-            { lbl: 'Süre', val: `~${etaMin} dk`, color: '#fb923c' }
+            { lbl: 'Süre', val: `~${etaMin}`, color: '#fb923c' }
           ].map(({ lbl, val, color }) => (
             <div key={lbl} style={{
               flex: '1 1 80px', background: 'rgba(255,255,255,0.04)',
@@ -334,12 +341,12 @@ export function MissionPlanner() {
       setPlannedMission({ ...result, altitudePlanned: clampedAlt });
       setScanRoute(result.waypoints);
       const distKm = (result.totalDistanceM / 1000).toFixed(2);
-      const etaMin = Math.round(result.totalDistanceM / Number(speedMs) / 60);
+      const etaMin = formatEta(result.totalDistanceM, speedMs);
 
       if (result.homeDistanceM == null) {
         setStatus({
           type: 'success',
-          msg: `✅ Rota hazır — ${result.waypointCount} waypoint · ${distKm} km · ~${etaMin} dk · şerit ${result.stripSpacingM} m. ` +
+          msg: `✅ Rota hazır — ${result.waypointCount} waypoint · ${distKm} km · ~${etaMin} · şerit ${result.stripSpacingM} m. ` +
                `⚠️ Drone konumu henüz bilinmiyor — ilk waypoint mesafesi kontrol edilemedi (500 m güvenlik limiti var, dikkatli olun).`
         });
       } else if (result.homeDistanceM > 450) {
@@ -350,7 +357,7 @@ export function MissionPlanner() {
       } else {
         setStatus({
           type: 'success',
-          msg: `✅ Rota hazır — ${result.waypointCount} waypoint · ${distKm} km · ~${etaMin} dk · şerit ${result.stripSpacingM} m · ilk waypoint'e ${result.homeDistanceM} m`
+          msg: `✅ Rota hazır — ${result.waypointCount} waypoint · ${distKm} km · ~${etaMin} · şerit ${result.stripSpacingM} m · ilk waypoint'e ${result.homeDistanceM} m`
         });
       }
     } catch (err) {
@@ -683,7 +690,7 @@ export function MissionPlanner() {
                 {[
                   { val: plannedMission.waypointCount, lbl: 'Waypoint', cls: 'text-primary' },
                   { val: `${(plannedMission.totalDistanceM/1000).toFixed(2)} km`, lbl: 'Toplam Mesafe', cls: 'text-primary' },
-                  { val: `${Math.round(plannedMission.totalDistanceM / Number(speedMs) / 60)} dk`, lbl: 'Tahmini Süre', cls: 'text-primary' },
+                  { val: formatEta(plannedMission.totalDistanceM, speedMs), lbl: 'Tahmini Süre', cls: 'text-primary' },
                   { val: `${plannedMission.stripSpacingM} m`, lbl: 'Şerit Aralığı', cls: 'text-primary' },
                   {
                     val: plannedMission.homeDistanceM != null ? `${plannedMission.homeDistanceM} m` : '—',

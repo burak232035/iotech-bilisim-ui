@@ -107,6 +107,25 @@ body {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
+/* Rows whose cards must share one height (the tallest card in the row wins).
+   Bootstrap rows are flex containers, so stretching the card to the column's
+   full height does it; the column's mb-* carries the row gap instead of the
+   card's own margin. */
+.row.cards-equal > [class*="col-"] {
+  display: flex;
+  flex-direction: column;
+}
+.row.cards-equal > [class*="col-"] > .card {
+  flex: 1 1 auto;
+  width: 100%;
+  margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+}
+.row.cards-equal > [class*="col-"] > .card > .card-body {
+  flex: 1 1 auto;
+}
+
 /* ========== FOOTER ========== */
 .site-footer {
   margin-top: auto;

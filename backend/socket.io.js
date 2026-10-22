@@ -37,6 +37,11 @@ const SWEEP_INTERVAL_MS             = 30 * 1000;
 // An "active" session this old is a leftover (app closed before landing was
 // seen): never resume it or attach a new flight to it — close it instead.
 const STALE_SESSION_MS              = 6 * 60 * 60 * 1000;
+// Scan progress fallback: a waypoint counts as reached when the drone's GPS fix
+// comes within this radius of it. Used alongside Android's mission_progress so
+// the dashboard advances per waypoint even if that event never arrives.
+const WP_REACH_RADIUS_M             = 8;
+const WP_LOOKAHEAD                  = 3; // only the next few waypoints are checked (strips are sequential)
 
 function isStale(sessionRow) {
   return !!sessionRow?.start_time && Date.now() - new Date(sessionRow.start_time).getTime() > STALE_SESSION_MS;
@@ -151,6 +156,68 @@ function updatePosition(entry, lat, lon) {
   const now = Date.now();
   entry.lastPosition = { lat, lon, updatedAt: now };
   lastKnownPosition = { lat, lon, updatedAt: now, droneId: entry.droneId };
+  trackSession(entry, lat, lon);
+}
+
+/**
+ * Per-session flight track kept in memory: first fix (start coordinates,
+ * written to the DB once), last fix and the distance flown. endDroneSession
+ * writes the end coordinates and total distance to flight_sessions so the PDF
+ * report can print them.
+ */
+function trackSession(entry, lat, lon) {
+  const s = entry.session;
+  if (!s) return;
+  if (!(lat === lat) || !(lon === lon) || (lat === 0 && lon === 0)) return; // NaN / no fix
+  let t = entry.track;
+  if (!t || t.sessionId !== s.id) {
+    t = entry.track = { sessionId: s.id, lat, lon, distM: 0, startWritten: false };
+    const hasStart = s.start_coordinates && typeof s.start_coordinates.lat === "number";
+    if (!hasStart) {
+      t.startWritten = true;
+      FlightSessionModel.setStartCoordinates(s.id, lat, lon)
+        .then((row) => { if (row && entry.session && entry.session.id === row.id) entry.session = row; })
+        .catch((err) => console.warn(`⚠️  start_coordinates yazılamadı (${s.id}):`, err.message));
+    }
+    return;
+  }
+  const d = distanceM(t.lat, t.lon, lat, lon);
+  // Ignore sub-metre GPS jitter while hovering, and absurd jumps (bad fix)
+  if (d >= 0.5 && d < 500) t.distM += d;
+  if (d < 500) { t.lat = lat; t.lon = lon; }
+}
+
+function distanceM(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+/**
+ * Advance the running mission's progress from the drone's position: the next
+ * few unreached waypoints are checked and the furthest one within
+ * WP_REACH_RADIUS_M becomes the new progress index. Returns true when it moved.
+ */
+function updateProgressFromPosition(entry, lat, lon) {
+  const m = entry.activeMission;
+  if (!m || m.state !== "running" || !Array.isArray(m.waypoints) || !m.waypoints.length) return false;
+  if (typeof lat !== "number" || typeof lon !== "number") return false;
+
+  const from = (m.progressIndex ?? -1) + 1;
+  const to = Math.min(m.waypoints.length - 1, from + WP_LOOKAHEAD - 1);
+  let reached = -1;
+  for (let i = from; i <= to; i++) {
+    const wp = m.waypoints[i];
+    if (distanceM(lat, lon, wp.lat, wp.lon) <= WP_REACH_RADIUS_M) reached = i;
+  }
+  if (reached < 0) return false;
+  m.progressIndex = reached;
+  m.progressSource = "position";
+  return true;
 }
 
 function sessionStartedPayload(entry) {
@@ -172,7 +239,12 @@ async function endDroneSession(entry, reason) {
   entry.activeMission = null;
   entry.missionEndedAt = null;
   entry.landedSince = null;
+  const track = entry.track && entry.track.sessionId === sessionId ? entry.track : null;
+  entry.track = null;
   try {
+    if (track) {
+      await FlightSessionModel.setTrackSummary(sessionId, { lat: track.lat, lon: track.lon }, track.distM);
+    }
     await FlightSessionModel.endSession(sessionId);
     console.log(`🛑 Flight session ended: ID ${sessionId} (${entry.droneId}, ${reason})`);
   } catch (err) {
@@ -359,7 +431,7 @@ async function openNewSession(entry, reason) {
  * Called by the mission route right before waypoint_mission: records the area
  * and mission, then re-sends session_started carrying the areaId.
  */
-async function prepareMissionStart(entry, { areaId, maxAltitude, rthHeight, purpose = "mapping", waypointCount = 0 }) {
+async function prepareMissionStart(entry, { areaId, maxAltitude, rthHeight, purpose = "mapping", waypointCount = 0, waypoints = [] }) {
   // A leftover session from an earlier day must not swallow this flight
   if (entry.session && isStale(entry.session)) await endDroneSession(entry, "stale");
   // Previous session may have closed after landing while the drone stayed connected
@@ -368,7 +440,9 @@ async function prepareMissionStart(entry, { areaId, maxAltitude, rthHeight, purp
   entry.activeAreaId      = areaId ?? null;
   entry.activeMission     = {
     maxAltitude, rthHeight, purpose, startedAt: Date.now(),
-    areaId: areaId ?? null, waypointCount, progressIndex: -1, state: "running"
+    areaId: areaId ?? null, waypointCount, progressIndex: -1, state: "running",
+    // lat/lon only — used by updateProgressFromPosition
+    waypoints: waypoints.map((wp) => ({ lat: Number(wp.lat), lon: Number(wp.lon) }))
   };
   entry.lastMission       = null;
   entry.missionEndedAt    = null;
@@ -508,6 +582,11 @@ function initializeSocketIO(httpServer) {
       const stamped = stampDroneId(socket, data, "drone_telemetry");
       entry.lastTelemetry = stamped;
       updatePosition(entry, data?.lat, data?.lon);
+      if (updateProgressFromPosition(entry, data?.lat, data?.lon)) {
+        const m = entry.activeMission;
+        console.log(`📍 ${entry.droneId}: WP ${m.progressIndex + 1}/${m.waypointCount} (konumdan)`);
+        broadcastDronesState();
+      }
 
       // Buffer telemetry (non-blocking) — only flights are recorded
       if (entry.session) TelemetryService.bufferTelemetry(entry.session.id, stamped);
@@ -582,10 +661,20 @@ function initializeSocketIO(httpServer) {
     socket.on("mission_progress", (data) => {
       const stamped = stampDroneId(socket, data, "mission_progress");
       const entry = drones.get(stamped.droneId);
-      const idx = Number(data?.currentWaypointIndex);
+      // Android may name the index differently; accept the common variants
+      const raw = data?.currentWaypointIndex ?? data?.waypointIndex ?? data?.index ?? data?.reachedIndex;
+      const idx = Number(raw);
       if (entry?.activeMission && Number.isFinite(idx)) {
-        entry.activeMission.progressIndex = Math.max(entry.activeMission.progressIndex ?? -1, idx);
-        broadcastDronesState();
+        const m = entry.activeMission;
+        const next = Math.max(m.progressIndex ?? -1, idx);
+        if (next !== m.progressIndex) {
+          m.progressIndex = next;
+          m.progressSource = "android";
+          console.log(`📍 ${stamped.droneId}: WP ${next + 1}/${m.waypointCount} (Android mission_progress)`);
+          broadcastDronesState();
+        }
+      } else {
+        console.warn(`⚠️  mission_progress (${stamped.droneId || socket.id}) işlenemedi:`, JSON.stringify(data));
       }
       emitToWeb("mission_progress", stamped);
     });

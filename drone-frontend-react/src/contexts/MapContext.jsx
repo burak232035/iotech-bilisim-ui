@@ -176,6 +176,11 @@ export function MapProvider({ children }) {
     setPhotoCount((c) => c + 1);
   }, []);
 
+  /** Called by LeafletMap when it drops n preview overlays (e.g. covered by a new orthomosaic) */
+  const decrementPhotoCount = useCallback((n = 1) => {
+    setPhotoCount((c) => Math.max(0, c - n));
+  }, []);
+
   /** Remove all photo overlays from the map canvas */
   const clearPhotoOverlays = useCallback(() => {
     setClearPhotosFlag((f) => f + 1);
@@ -211,6 +216,7 @@ export function MapProvider({ children }) {
       setScanRoute,
       photoCount,
       incrementPhotoCount,
+      decrementPhotoCount,
       clearPhotoOverlays,
       clearPhotosFlag,
       wasteDetections,
@@ -235,6 +241,7 @@ export function MapProvider({ children }) {
       scanRoute,
       photoCount,
       incrementPhotoCount,
+      decrementPhotoCount,
       clearPhotoOverlays,
       clearPhotosFlag,
       wasteDetections,

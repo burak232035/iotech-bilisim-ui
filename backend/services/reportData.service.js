@@ -63,14 +63,43 @@ class ReportDataService {
     const durationSecs = durationSeconds % 60;
     const durationFormatted = `${String(durationMinutes).padStart(2, '0')}:${String(durationSecs).padStart(2, '0')}`;
 
-    // Format coordinates
-    const startCoords = session.start_coordinates
-      ? `${session.start_coordinates.lat || 'N/A'}, ${session.start_coordinates.lon || 'N/A'}`
-      : "N/A";
+    // Coordinates: the session's recorded first/last GPS fix; for flights
+    // recorded before that was tracked, fall back to the first/last photo.
+    const fmtCoord = (c) =>
+      c && Number.isFinite(Number(c.lat)) && Number.isFinite(Number(c.lon))
+        ? `${Number(c.lat).toFixed(6)}, ${Number(c.lon).toFixed(6)}`
+        : null;
 
-    const endCoords = session.end_coordinates
-      ? `${session.end_coordinates.lat || 'N/A'}, ${session.end_coordinates.lon || 'N/A'}`
-      : startCoords; // Use start coords if end not available
+    let startCoords = fmtCoord(session.start_coordinates);
+    let endCoords = fmtCoord(session.end_coordinates);
+    let distanceM = session.total_distance_meters != null ? Number(session.total_distance_meters) : null;
+
+    if (!startCoords || !endCoords || distanceM == null) {
+      const photos = await pool.query(
+        `SELECT lat, lon FROM photos WHERE session_id = $1
+         ORDER BY COALESCE(captured_at, uploaded_at), id`,
+        [sessionId]
+      );
+      const rows = photos.rows;
+      if (rows.length) {
+        if (!startCoords) startCoords = fmtCoord(rows[0]);
+        if (!endCoords) endCoords = fmtCoord(rows[rows.length - 1]);
+        if (distanceM == null && rows.length > 1) {
+          // Photo-to-photo path length: a lower bound of the distance flown
+          const R = 6371000, toRad = (d) => (d * Math.PI) / 180;
+          distanceM = 0;
+          for (let i = 1; i < rows.length; i++) {
+            const a = rows[i - 1], b = rows[i];
+            const dLat = toRad(b.lat - a.lat), dLon = toRad(b.lon - a.lon);
+            const h = Math.sin(dLat / 2) ** 2 +
+              Math.cos(toRad(Number(a.lat))) * Math.cos(toRad(Number(b.lat))) * Math.sin(dLon / 2) ** 2;
+            distanceM += 2 * R * Math.asin(Math.sqrt(h));
+          }
+        }
+      }
+    }
+    startCoords = startCoords || "N/A";
+    endCoords = endCoords || startCoords;
 
     // Generate report number
     const reportNumber = `RPR-${session.id}-${Date.now()}`;
@@ -103,8 +132,8 @@ class ReportDataService {
       analizSaati: formatTime(now),
       baslangic: startCoords,
       bitis: endCoords,
-      taramaMesafesi: session.total_distance_meters
-        ? `${(session.total_distance_meters / 1000).toFixed(2)} km`
+      taramaMesafesi: distanceM != null && distanceM > 0
+        ? (distanceM >= 1000 ? `${(distanceM / 1000).toFixed(2)} km` : `${Math.round(distanceM)} m`)
         : "N/A",
       ucusSuresi: durationFormatted,
       genelDegerlendirme: "0 tespit", // report.routes.js gerçek waste_detections toplamıyla değiştirir

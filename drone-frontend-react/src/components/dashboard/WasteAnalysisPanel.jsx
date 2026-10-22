@@ -137,28 +137,36 @@ export function WasteAnalysisPanel() {
     <div className="row mt-2">
       <div className="col-12">
         <Card title="Çöp Sınıflandırma (YOLO)" icon="fas fa-recycle" variant="success">
-          <button
-            type="button"
-            className="btn btn-success btn-block"
-            onClick={handleAnalyze}
-            disabled={isRunning || !currentSessionId}
-          >
-            {isRunning ? (
-              <><span className="loading-spinner"></span> {progressLabel}</>
-            ) : (
-              'Fotoğrafları Analiz Et'
-            )}
-          </button>
-
-          <button
-            type="button"
-            className="btn btn-outline-success btn-block mt-2"
-            onClick={handleShowAreaMap}
-            disabled={areaLoading || !selectedAreaId}
-            title={selectedAreaId ? '' : 'Önce haritadan bir alan seçin'}
-          >
-            {areaLoading ? 'Yükleniyor…' : 'Alanın Çöp Haritasını Göster (ortomozaik + tüm tespitler)'}
-          </button>
+          {/* Two actions side by side, same width and height */}
+          <div className="row g-3">
+            <div className="col-md-6 d-flex">
+              <button
+                type="button"
+                className="btn btn-success w-100"
+                style={{ minHeight: 48 }}
+                onClick={handleAnalyze}
+                disabled={isRunning || !currentSessionId}
+              >
+                {isRunning ? (
+                  <><span className="loading-spinner"></span> {progressLabel}</>
+                ) : (
+                  <><i className="fas fa-search me-2"></i>Fotoğrafları Analiz Et</>
+                )}
+              </button>
+            </div>
+            <div className="col-md-6 d-flex">
+              <button
+                type="button"
+                className="btn btn-outline-success w-100"
+                style={{ minHeight: 48 }}
+                onClick={handleShowAreaMap}
+                disabled={areaLoading || !selectedAreaId}
+                title={selectedAreaId ? 'Ortomozaik + alandaki tüm tespitler' : 'Önce haritadan bir alan seçin'}
+              >
+                {areaLoading ? 'Yükleniyor…' : <><i className="fas fa-map me-2"></i>Alanın Çöp Haritasını Göster</>}
+              </button>
+            </div>
+          </div>
 
           {!currentSessionId && (
             <small className="d-block mt-2 text-muted">

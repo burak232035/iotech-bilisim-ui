@@ -95,7 +95,7 @@ export default function DashboardPage() {
           <TelemetryGrid />
 
           {/* GIMBAL, ALTITUDE, GPS ROW */}
-          <div className="row mt-3">
+          <div className="row mt-3 cards-equal">
             <div className="col-md-4 mb-3">
               <GimbalCard />
             </div>

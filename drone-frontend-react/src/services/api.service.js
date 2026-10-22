@@ -166,13 +166,17 @@ class ApiServiceClass {
   async generateReport(sessionId, areaId, points, options = {}) {
     // The backend builds the PDF in the background: POST returns { jobId },
     // then wait-and-download holds the request until the file is ready.
+    // `kategoriler` (display names of the waste categories to print) travels
+    // at the top level, as report.routes.js reads it there.
+    const { kategoriler, ...droneOptions } = options;
     const { jobId } = await this.request(API_ENDPOINTS.REPORTS, {
       method: 'POST',
       body: JSON.stringify({
         sessionId,
         areaId,
         points,
-        options
+        kategoriler,
+        options: droneOptions
       })
     });
     if (!jobId) throw new Error('Rapor işi başlatılamadı');
